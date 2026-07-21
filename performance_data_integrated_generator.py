@@ -1144,6 +1144,14 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
             if unmatched:
                 print(f"   未匹配（保留原名）: {len(unmatched)} 个")
 
+    # 产品名称为"0"的数据设置为空值
+    if "产品名称" in df.columns:
+        product_name_zero_mask = df['产品名称'].fillna('').astype(str).str.strip() == '0'
+        zero_count = product_name_zero_mask.sum()
+        if zero_count > 0:
+            df.loc[product_name_zero_mask, '产品名称'] = np.nan
+            print(f"   产品名称为'0'的数据: {zero_count}行 → 设置为空值")
+
     # Step 5: 数据清洗
     print("🧹 Step 5: 数据清洗...")
 
@@ -1494,6 +1502,17 @@ def _com_write_sheet(ws, df, ncols_ref, chunk=1000):
             except Exception:
                 pass
         if is_date_col:
+            continue
+        # 检查是否包含特殊日期格式(如'1900/1/0')，如果是则保留日期格式
+        has_special_date = False
+        try:
+            for val in col:
+                if isinstance(val, str) and (val.strip() == '1900/1/0' or val.strip() == '1900/01/00'):
+                    has_special_date = True
+                    break
+        except Exception:
+            pass
+        if has_special_date:
             continue
         # 非日期列(字符串/数值)检查是否误设日期格式
         nf = str(ws.Cells(2, ci + 1).NumberFormat).lower()
@@ -1966,7 +1985,10 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
         excel_app.DisplayAlerts = False
         excel_app.AskToUpdateLinks = False
         excel_app.EnableEvents = False
-        excel_app.Calculation = -4135
+        try:
+            excel_app.Calculation = -4135
+        except Exception:
+            print("   ⚠️ 无法设置手动计算模式，继续执行")
 
         out_resolved = str(Path(output_file_path).resolve())
         print(f"   📂 打开文件: {out_resolved}")
