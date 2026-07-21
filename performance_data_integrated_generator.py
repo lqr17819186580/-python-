@@ -831,11 +831,24 @@ def _clean_nianqi_and_payment(df):
 
 
 def _convert_date_cols(df, date_cols):
-    """日期列转换为 datetime。"""
+    """日期列转换为 datetime。保留特殊日期格式如'1900/1/0'作为字符串。"""
     for col in date_cols:
         if col in df.columns and df[col].dtype == 'object':
-            df[col] = pd.to_datetime(df[col], errors='coerce')
-            print(f"   '{col}' → datetime")
+            converted = []
+            for val in df[col]:
+                if pd.isna(val):
+                    converted.append(pd.NaT)
+                else:
+                    s = str(val).strip()
+                    if s == '1900/1/0' or s == '1900/01/00':
+                        converted.append(s)
+                    else:
+                        try:
+                            converted.append(pd.to_datetime(s))
+                        except (ValueError, TypeError):
+                            converted.append(pd.NaT)
+            df[col] = converted
+            print(f"   '{col}' → datetime（保留特殊格式）")
 
 
 def _convert_money_cols(df, money_cols):
@@ -1227,6 +1240,10 @@ def _com_convert_value(v):
         return _dt_to_xldate(_dt.datetime(v.year, v.month, v.day))
     if isinstance(v, _dt.time):
         return str(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if s == '1900/1/0' or s == '1900/01/00':
+            return 0.0
     if hasattr(v, '__str__'):
         return str(v)
     return v
@@ -1949,6 +1966,7 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
         excel_app.DisplayAlerts = False
         excel_app.AskToUpdateLinks = False
         excel_app.EnableEvents = False
+        excel_app.Calculation = -4135
 
         out_resolved = str(Path(output_file_path).resolve())
         print(f"   📂 打开文件: {out_resolved}")
@@ -1965,6 +1983,17 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
                     pythoncom.PumpWaitingMessages()
                 else:
                     raise open_err
+
+        def com_retry(func, max_retries=5, delay=3):
+            for attempt in range(max_retries):
+                try:
+                    return func()
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        _time.sleep(delay)
+                        pythoncom.PumpWaitingMessages()
+                    else:
+                        raise e
 
         # ---- 写入 V0/V0-NGP/V0-IYB业绩 数据 ----
         print("   📝 写入 V0 数据...")
@@ -1988,19 +2017,10 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
         except Exception as e_iyb:
             print(f"      ⚠️ V0-IYB业绩 sheet 写入失败: {e_iyb}")
 
-        print("   💾 保存数据写入结果...")
-        wb_out.Save()
-
         # ---- 修复 spill sheet 日期格式错配 ----
         print("   🔧 修复 spill sheet 日期格式错配（按列名而非索引）...")
         _spill_fmt_fixed, _date_col_names = _fix_spill_date_formats(wb_out, df_v0)
         print(f"      共修复 {_spill_fmt_fixed} 个 spill sheet 非日期列的日期格式")
-        print(f"      日期列名集合: {_date_col_names}")
-
-        # ---- 第一轮重算所有公式 ----
-        print("   📊 正在重算所有公式（CalculateFullRebuild）...")
-        _recalc_and_save(excel_app, wb_out, method='full')
-        print("   💾 第一轮重算完成，缓存值已保存")
 
         # ---- V0-IYB业绩 端口/分层空值兜底 ----
         print("   🛡️ V0-IYB业绩 端口/分层空值兜底验证...")
@@ -2009,97 +2029,49 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
             _backfilled = _verify_iyb_port_layer(_ws_iyb_check, df_iyb.shape[0], df_iyb)
             if _backfilled > 0:
                 print(f"      兜底写入: {_backfilled} 行端口/分层值")
-                wb_out.Save()
             else:
                 print(f"      ✅ 无空值")
         except Exception as _bf_err:
             print(f"      ⚠️ 兜底验证异常: {_bf_err}")
 
-        # ---- 公式重算结果统计 ----
-        print("   📋 公式重算结果统计:")
-        total_formulas, total_errors, result_rows = _count_formulas_and_errors(wb_out)
-        for status, name, fc, ec in result_rows:
-            print(f"      {status} {name}: {fc}个公式, {ec}个错误值")
-        print(f"   总计: {total_formulas}个公式, {total_errors}个错误值")
+        # ---- 清理 spilled 范围错误值 ----
+        print("   🧹 清理 spilled 范围错误值...")
+        sheets_to_process = [wb_out.Worksheets(i).Name for i in range(1, wb_out.Worksheets.Count + 1)
+                             if wb_out.Worksheets(i).Name not in ('V0', 'V0-NGP')]
+        cleared_count = _com_clear_spilled_errors(wb_out, sheets_to_process, com_retry)
+        print(f"      共清除 {cleared_count} 个错误值")
 
-        def com_retry(func, max_retries=5, delay=3):
-            for attempt in range(max_retries):
-                try:
-                    return func()
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        _time.sleep(delay)
-                        pythoncom.PumpWaitingMessages()
-                    else:
-                        raise e
+        # ---- 修复 #DIV/0! 除法公式 + 清理 DISPIMG ----
+        print("   🔧 修复 #DIV/0! 除法公式（包裹 IFERROR）+ 清理 DISPIMG 公式...")
+        div_fixed, dispimg_cleared = _com_fix_div_formulas(wb_out, sheets_to_process, com_retry)
+        print(f"      共修复 {div_fixed} 个 #DIV/0! 除法公式, 清理 {dispimg_cleared} 个 DISPIMG 公式")
 
+        # ---- 修复 V0-合并表 E列 #N/A ----
+        print("   🔧 修复 V0-合并表 E列 #N/A（IFERROR 包裹 CHOOSE/MATCH）...")
+        merge_fixed = _com_fix_merge_na(wb_out, com_retry)
+        if merge_fixed:
+            print("      ✅ V0-合并表 E列已修复")
+
+        # ---- 一次重算所有公式（合并所有操作后只重算一次）----
+        print("   📊 正在重算所有公式（仅一次，合并所有修复操作）...")
+        excel_app.Calculation = -4105
         try:
-            sheets_to_process = [wb_out.Worksheets(i).Name for i in range(1, wb_out.Worksheets.Count + 1)
-                                 if wb_out.Worksheets(i).Name not in ('V0', 'V0-NGP')]
+            excel_app.CalculateFullRebuild()
+        except Exception:
+            try:
+                excel_app.CalculateFull()
+            except Exception:
+                pass
+        for _ in range(60):
+            try:
+                if excel_app.CalculationState == 0:
+                    break
+            except Exception:
+                pass
+            _time.sleep(0.25)
+        _time.sleep(0.5)
 
-            # ---- 清理 spilled 范围错误值 ----
-            print("   🧹 清理 spilled 范围错误值...")
-            _time.sleep(1)
-            cleared_count = _com_clear_spilled_errors(wb_out, sheets_to_process, com_retry)
-            print(f"      共清除 {cleared_count} 个错误值")
-            if cleared_count > 0:
-                print("   📊 重新计算公式...")
-                _time.sleep(0.5)
-                com_retry(lambda: excel_app.CalculateFullRebuild(), max_retries=3, delay=5)
-                _recalc_and_save(excel_app, wb_out, method='normal')
-
-            # ---- 修复 #DIV/0! 除法公式 + 清理 DISPIMG ----
-            print("   🔧 修复 #DIV/0! 除法公式（包裹 IFERROR）+ 清理 DISPIMG 公式...")
-            _time.sleep(0.5)
-            div_fixed, dispimg_cleared = _com_fix_div_formulas(wb_out, sheets_to_process, com_retry)
-            print(f"      共修复 {div_fixed} 个 #DIV/0! 除法公式, 清理 {dispimg_cleared} 个 DISPIMG 公式")
-            if div_fixed > 0 or dispimg_cleared > 0:
-                print("   💾 保存 IFERROR 公式修改...")
-                try:
-                    wb_out.Save()
-                except Exception as e:
-                    print(f"      ⚠️ 保存公式失败: {e}")
-                print("   📊 重新计算公式...")
-                try:
-                    excel_app.Calculate()
-                except Exception:
-                    try:
-                        com_retry(lambda: excel_app.CalculateFullRebuild(), max_retries=2, delay=5)
-                    except Exception as e:
-                        print(f"      ⚠️ 重算失败（公式已保存）: {e}")
-                _recalc_and_save(excel_app, wb_out, method='normal')
-
-            # ---- 修复 V0-合并表 E列 #N/A ----
-            print("   🔧 修复 V0-合并表 E列 #N/A（IFERROR 包裹 CHOOSE/MATCH）...")
-            _time.sleep(0.5)
-            merge_fixed = _com_fix_merge_na(wb_out, com_retry)
-            if merge_fixed:
-                print("   💾 保存 V0-合并表 修复...")
-                try:
-                    wb_out.Save()
-                except Exception as e:
-                    print(f"      ⚠️ 保存失败: {e}")
-                print("   📊 重新计算公式...")
-                try:
-                    excel_app.Calculate()
-                except Exception:
-                    try:
-                        com_retry(lambda: excel_app.CalculateFullRebuild(), max_retries=2, delay=5)
-                    except Exception as e:
-                        print(f"      ⚠️ 重算失败（公式已保存）: {e}")
-                _recalc_and_save(excel_app, wb_out, method='normal')
-
-            # ---- 最终统计 ----
-            print("   📋 最终公式重算结果:")
-            total_formulas, total_errors, result_rows = _count_formulas_and_errors(wb_out)
-            for status, name, fc, ec in result_rows:
-                print(f"      {status} {name}: {fc}个公式, {ec}个错误值")
-            print(f"   最终总计: {total_formulas}个公式, {total_errors}个错误值")
-
-        except Exception as e:
-            print(f"   ⚠️ 清理重算阶段失败（文件已保存第一轮重算结果）: {e}")
-
-        # ---- 设置缩放比例 + 导出文件 ----
+        # ---- 设置缩放比例 ----
         print("   🔍 设置所有 sheet 缩放比例为 100%...")
         try:
             for _ws in wb_out.Worksheets:
@@ -2108,11 +2080,23 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
                     excel_app.ActiveWindow.Zoom = 100
                 except Exception:
                     pass
-            wb_out.Save()
             print("      ✅ 缩放比例已设置")
         except Exception as e:
             print(f"      ⚠️ 设置缩放比例失败: {e}")
 
+        # ---- 公式重算结果统计 ----
+        print("   📋 公式重算结果统计:")
+        total_formulas, total_errors, result_rows = _count_formulas_and_errors(wb_out)
+        for status, name, fc, ec in result_rows:
+            print(f"      {status} {name}: {fc}个公式, {ec}个错误值")
+        print(f"   总计: {total_formulas}个公式, {total_errors}个错误值")
+
+        # ---- 保存文件（仅一次）----
+        print("   💾 保存文件...")
+        wb_out.Save()
+        print("      ✅ 文件保存完成")
+
+        # ---- 导出文件 ----
         print("   📋 另存 V0-SunLife 为永明业绩数据...")
         _export_sunlife(excel_app, wb_out, str(Path(output_file_path).parent), today_str)
 
@@ -3044,11 +3028,19 @@ def _cmp_validate_sheet_fields(ref_file, out_file, sheet_name):
     ref_only_cols = [c for c in ref_df.columns if c not in out_df.columns]
     out_only_cols = [c for c in out_df.columns if c not in ref_df.columns]
 
-    # 预转换为str（先 fillna('') 再 astype(str)，避免新版 pandas 中 NaN 不被转为字符串
+    # 预转换为str（先 fillna('') 再转换，避免新版 pandas 中 NaN 不被转为字符串
     # 导致 float('nan') != float('nan') 误判全 NaN 列为全部不同）
-    ref_df_str = ref_df[common_cols].fillna('').astype(str)
-    out_df_str = out_df[common_cols].fillna('').astype(str)
-    id_vals = ref_df[id_col].fillna('').astype(str).tolist() if id_col else []
+    # 修复：float类型的值转换为字符串时去除 .0 后缀（如 602068558.0 → 602068558）
+    def _clean_float_str(val):
+        if isinstance(val, float):
+            if val == int(val):
+                return str(int(val))
+            return str(val)
+        return str(val)
+
+    ref_df_str = ref_df[common_cols].fillna('').apply(lambda col: col.apply(_clean_float_str))
+    out_df_str = out_df[common_cols].fillna('').apply(lambda col: col.apply(_clean_float_str))
+    id_vals = ref_df[id_col].fillna('').apply(_clean_float_str).tolist() if id_col else []
 
     # 每列逐行对比
     col_results = []
