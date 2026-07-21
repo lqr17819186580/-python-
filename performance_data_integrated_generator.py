@@ -309,7 +309,7 @@ QUERY_TO_V0_MAP = {
 
 # 综合查询中需要丢弃的列
 QUERY_DROP_COLS = [
-    '订单状态', '是否预缴', '是否专业投资者',
+    '订单状态', '是否专业投资者',
     '结算模式', '订单子状态',
 ]
 
@@ -788,15 +788,70 @@ def apply_value_map(df, col_name, mapping, print_label=None):
     else:
         print(f"   无需映射的{label}值")
 
-    # "0" → NaN
     mask_zero = df[col_name].astype(str).str.strip() == '0'
     if mask_zero.sum() > 0:
         print(f"   {label}值\"0\" → 空值 ({mask_zero.sum()}条)")
         df.loc[mask_zero, col_name] = np.nan
 
-    # 打印值域
     vals = df[col_name].dropna().unique()
     print(f"   映射后{label}值域: {sorted([str(x) for x in vals])}")
+    return df
+
+
+def _clean_numeric_string_cols(df, cols, print_label=''):
+    """数值列中字符串"0"→NaN。"""
+    for col in cols:
+        if col in df.columns:
+            mask = df[col].astype(str).str.strip() == '0'
+            zero_count = mask.sum()
+            if zero_count > 0:
+                print(f"   '{col}' \"0\" → NaN ({zero_count}条)")
+                df.loc[mask, col] = None
+
+
+def _clean_nianqi_and_payment(df):
+    """年期清洗和整付保费特殊处理。"""
+    if '年期' not in df.columns:
+        return df
+
+    nianqi_old = df['年期'].fillna('').astype(str)
+    zhengfu_mask = nianqi_old.str.strip() == '整付保费'
+    if zhengfu_mask.sum() > 0:
+        print(f"   整付保费特殊处理: {zhengfu_mask.sum()}行 → 年期=1, 供款方式=整付")
+        if '供款方式' in df.columns:
+            df.loc[zhengfu_mask, '供款方式'] = '整付'
+
+    nianqi_new = nianqi_old.str.rstrip('年').str.strip()
+    nianqi_cleaned = nianqi_new.apply(_clean_nianqi)
+    changed = (nianqi_old != nianqi_cleaned.astype(str)).sum()
+    if changed > 0:
+        print(f"   年期去\"年\"字: {changed}个值发生变化")
+    df['年期'] = nianqi_cleaned
+    return df
+
+
+def _convert_date_cols(df, date_cols):
+    """日期列转换为 datetime。"""
+    for col in date_cols:
+        if col in df.columns and df[col].dtype == 'object':
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+            print(f"   '{col}' → datetime")
+
+
+def _convert_money_cols(df, money_cols):
+    """金额列转换为 float。"""
+    for col in money_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            print(f"   '{col}' → float")
+
+
+def _apply_standard_mappings(df):
+    """应用标准映射：币种、保单状态、产品品类、供款方式。"""
+    df = apply_value_map(df, '币种', CURRENCY_MAP, '币种')
+    df = apply_value_map(df, '保单状态', POLICY_STATUS_MAP, '保单状态')
+    df = apply_value_map(df, '产品品类', PRODUCT_CATEGORY_MAP, '产品品类')
+    df = apply_value_map(df, '供款方式', PAYMENT_METHOD_MAP, '供款方式')
     return df
 
 
@@ -902,6 +957,13 @@ def process_v0_data(query_file_path, mapping_table_path=None):
         if col not in df_query.columns:
             df_query[col] = np.nan
 
+    # 保存是否预缴/是否缴纳列的值（用于后续供款方式清洗）
+    prepaid_values = None
+    if '是否预缴' in df_query.columns:
+        prepaid_values = df_query['是否预缴'].astype(str).str.strip()
+    elif '是否缴纳' in df_query.columns:
+        prepaid_values = df_query['是否缴纳'].astype(str).str.strip()
+
     df_v0 = df_query[V0_COLUMNS].copy()
     print(f"   映射完成: {df_v0.shape[1]} 列（按V0顺序）")
     print(f"   V0数据行: {df_v0.shape[0]} 行")
@@ -915,23 +977,14 @@ def process_v0_data(query_file_path, mapping_table_path=None):
     print()
     print("🧹 Step 7: 数据清洗...")
 
-    # 产品品类映射
-    df_v0 = apply_value_map(df_v0, '产品品类', PRODUCT_CATEGORY_MAP, '产品品类')
-
-    # 币种映射
-    df_v0 = apply_value_map(df_v0, '币种', CURRENCY_MAP, '币种')
-
-    # 供款方式映射
-    df_v0 = apply_value_map(df_v0, '供款方式', PAYMENT_METHOD_MAP, '供款方式')
+    # 应用标准映射（币种、保单状态、产品品类、供款方式）
+    df_v0 = _apply_standard_mappings(df_v0)
 
     # 电话列修复
     df_v0 = fix_phone_dot0(df_v0)
 
     # 数值列"0"→NaN
-    for col in NUMERIC_STRING_COLS:
-        if col in df_v0.columns:
-            mask = df_v0[col].astype(str).str.strip() == '0'
-            df_v0.loc[mask, col] = np.nan
+    _clean_numeric_string_cols(df_v0, NUMERIC_STRING_COLS)
 
     # 佣金模式 NaN → 0
     if '佣金模式' in df_v0.columns:
@@ -941,20 +994,16 @@ def process_v0_data(query_file_path, mapping_table_path=None):
     if '计划书年龄' in df_v0.columns:
         df_v0['计划书年龄'] = pd.to_numeric(df_v0['计划书年龄'], errors='coerce')
 
-    # 年期清洗
-    if '年期' in df_v0.columns:
-        nianqi_old = df_v0['年期'].fillna('').astype(str)
-        zhengfu_mask = nianqi_old.str.strip() == '整付保费'
-        if zhengfu_mask.sum() > 0:
-            print(f"   整付保费特殊处理: {zhengfu_mask.sum()}行 → 年期=1, 供款方式=整付")
-            if '供款方式' in df_v0.columns:
-                df_v0.loc[zhengfu_mask, '供款方式'] = '整付'
-        nianqi_new = nianqi_old.str.rstrip('年').str.strip()
-        nianqi_cleaned = nianqi_new.apply(_clean_nianqi)
-        changed = (nianqi_old != nianqi_cleaned.astype(str)).sum()
-        if changed > 0:
-            print(f"   年期去\"年\"字: {changed}个值发生变化")
-        df_v0['年期'] = nianqi_cleaned
+    # 年期清洗和整付保费特殊处理
+    df_v0 = _clean_nianqi_and_payment(df_v0)
+
+    # 是否预缴为"是"时，供款方式设置为"预缴"（优先级高于整付保费）
+    if prepaid_values is not None and '供款方式' in df_v0.columns:
+        prepaid_mask = prepaid_values == '是'
+        prepaid_count = prepaid_mask.sum()
+        if prepaid_count > 0:
+            print(f"   是否预缴为\"是\"的行: {prepaid_count}行 → 供款方式设置为\"预缴\"")
+            df_v0.loc[prepaid_mask, '供款方式'] = '预缴'
 
     # 保单号码格式化
     print()
@@ -1085,69 +1134,36 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
     # Step 5: 数据清洗
     print("🧹 Step 5: 数据清洗...")
 
-    # 5a: 日期列
-    for col in NGP_DATE_COLUMNS:
-        if col in df.columns and df[col].dtype == 'object':
-            df[col] = pd.to_datetime(df[col], errors='coerce')
-            print(f"   '{col}' → datetime")
+    # 日期列转换
+    _convert_date_cols(df, NGP_DATE_COLUMNS)
 
-    # 5b: 金额列
-    for col in NGP_MONEY_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            print(f"   '{col}' → float")
+    # 金额列转换
+    _convert_money_cols(df, NGP_MONEY_COLUMNS)
 
-    # 5c: 计划书年龄
+    # 计划书年龄 → float
     if "计划书年龄" in df.columns:
         df["计划书年龄"] = pd.to_numeric(df["计划书年龄"], errors='coerce')
 
-    # 5d: 佣金模式 NaN → 0
+    # 佣金模式 NaN → 0
     if "佣金模式" in df.columns:
         df["佣金模式"] = pd.to_numeric(df["佣金模式"], errors='coerce').fillna(0)
 
-    # 5k: 币种映射
-    df = apply_value_map(df, '币种', CURRENCY_MAP, '币种')
+    # 应用标准映射（币种、保单状态、产品品类、供款方式）
+    df = _apply_standard_mappings(df)
 
-    # 5l: 保单状态映射
-    df = apply_value_map(df, '保单状态', POLICY_STATUS_MAP, '保单状态')
+    # 年期清洗和整付保费特殊处理
+    df = _clean_nianqi_and_payment(df)
 
-    # 5m: 产品品类映射
-    df = apply_value_map(df, '产品品类', PRODUCT_CATEGORY_MAP, '产品品类')
-
-    # 5ma: 供款方式映射
-    df = apply_value_map(df, '供款方式', PAYMENT_METHOD_MAP, '供款方式')
-
-    # 5n: 年期清洗
-    if '年期' in df.columns:
-        nianqi_old = df['年期'].fillna('').astype(str)
-        zhengfu_mask = nianqi_old.str.strip() == '整付保费'
-        if zhengfu_mask.sum() > 0:
-            print(f"   整付保费特殊处理: {zhengfu_mask.sum()}行 → 年期=1, 供款方式=整付")
-            if '供款方式' in df.columns:
-                df.loc[zhengfu_mask, '供款方式'] = '整付'
-        nianqi_new = nianqi_old.str.rstrip('年').str.strip()
-        nianqi_cleaned = nianqi_new.apply(_clean_nianqi)
-        changed = (nianqi_old != nianqi_cleaned.astype(str)).sum()
-        if changed > 0:
-            print(f"   年期去\"年\"字: {changed}个值发生变化")
-        df['年期'] = nianqi_cleaned
-
-    # 5o: 保单号码格式化
+    # 保单号码格式化
     print()
     print("🔢 保单号码格式化...")
     df = format_policy_number(df, '保单号码')
 
-    # 5p: 电话列修复
+    # 电话列修复
     df = fix_phone_dot0(df)
 
-    # 5q: 数值列"0"→NaN
-    for col in NUMERIC_STRING_COLS:
-        if col in df.columns:
-            mask = df[col].astype(str).str.strip() == '0'
-            zero_count = mask.sum()
-            if zero_count > 0:
-                print(f"   '{col}' \"0\" → NaN ({zero_count}条)")
-                df.loc[mask, col] = None
+    # 数值列"0"→NaN
+    _clean_numeric_string_cols(df, NUMERIC_STRING_COLS)
 
     print(f"   V0-NGP最终数据: {df.shape[0]} 行 × {df.shape[1]} 列")
 
@@ -1158,262 +1174,7 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
 # Excel 格式设置函数
 # ============================================================
 
-def format_v0_sheet(ws, df_v0):
-    """设置 V0 sheet 的格式（与参考文件V0完全一致）。"""
-    print("   设置 V0 sheet 格式...")
 
-    # 列名→列序号映射
-    col_name_to_idx = {name: i + 1 for i, name in enumerate(V0_COLUMNS)}
-
-    # 列名→颜色映射
-    col_to_color = {}
-    for color_hex, cols in HEADER_COLOR_GROUPS.items():
-        for col in cols:
-            col_to_color[col] = color_hex
-
-    # 表头样式
-    header_font_bold = Font(name='微软雅黑', size=11, bold=True, color='FFFFFFFF')
-    header_font_not_bold = Font(name='微软雅黑', size=11, bold=False, color='FFFFFFFF')
-
-    # 设置表头格式
-    for col_name in V0_COLUMNS:
-        idx = col_name_to_idx[col_name]
-        cell = ws.cell(1, idx)
-        color_hex = col_to_color.get(col_name, 'FFC55A11')
-
-        # Font
-        if col_name in HEADER_BOLD_FALSE_COLS:
-            cell.font = header_font_not_bold
-        else:
-            cell.font = header_font_bold
-
-        # Fill
-        cell.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type='solid')
-
-        # Alignment
-        if col_name in HEADER_WRAP_TRUE_COLS:
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        else:
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=None)
-
-        # Border
-        left_style = 'thin' if col_name not in HEADER_LEFT_NONE_COLS else None
-        right_style = 'thin' if col_name not in HEADER_RIGHT_NONE_COLS else None
-        top_style = 'thin'
-        bottom_style = 'thin' if col_name in HEADER_BOTTOM_THIN_COLS else None
-        cell.border = Border(
-            left=Side(style=left_style, color='FF000000') if left_style else Side(style=None),
-            right=Side(style=right_style, color='FF000000') if right_style else Side(style=None),
-            top=Side(style=top_style, color='FF000000'),
-            bottom=Side(style=bottom_style, color='FF000000') if bottom_style else Side(style=None),
-        )
-
-    # 数据行样式
-    data_font_songti = Font(name='宋体', size=11)
-    data_font_yahei = Font(name='微软雅黑', size=11)
-    data_align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    data_align_default = Alignment(horizontal=None, vertical=None)
-    data_align_right = Alignment(horizontal='right', vertical='center')
-    data_border = Border(
-        left=Side(style='thin', color='FF000000'),
-        right=Side(style='thin', color='FF000000'),
-        top=Side(style='thin', color='FF000000'),
-        bottom=Side(style='thin', color='FF000000'),
-    )
-    yellow_fill = PatternFill(start_color='FFFFFF00', end_color='FFFFFF00', fill_type='solid')
-
-    # 设置数据行格式
-    total_rows = df_v0.shape[0] + 1
-
-    for row_idx in range(2, total_rows + 1):
-        for col_name in V0_COLUMNS:
-            idx = col_name_to_idx[col_name]
-            cell = ws.cell(row_idx, idx)
-
-            # Font
-            if col_name in DATA_SPECIAL_FONT_COLS:
-                cell.font = Font(name=DATA_SPECIAL_FONT_COLS[col_name], size=11)
-            else:
-                cell.font = data_font_songti
-
-            # Alignment (styled cols=center/center, 合计=right/center, plain cols=None/None)
-            if col_name in DATA_STYLED_COLS and col_name not in DATA_RIGHT_ALIGN_COLS:
-                cell.alignment = data_align_center
-            elif col_name in DATA_RIGHT_ALIGN_COLS:
-                cell.alignment = data_align_right
-            else:
-                cell.alignment = data_align_default
-
-            # Border (styled cols get 4-side thin, plain cols get None)
-            if col_name in DATA_STYLED_COLS and col_name not in DATA_RIGHT_ALIGN_COLS:
-                cell.border = data_border
-            elif col_name in DATA_RIGHT_ALIGN_COLS:
-                # 合计列: 微软雅黑+右对齐+无边框
-                cell.border = Border()
-            else:
-                # plain列: 无边框
-                cell.border = Border()
-
-            # Yellow fill for 保单状态
-            if col_name in DATA_YELLOW_FILL_COLS:
-                cell.fill = yellow_fill
-
-            # Number format
-            if col_name in V0_DATE_COLUMNS:
-                cell.number_format = 'yyyy\\-mm\\-dd'
-            elif col_name in V0_AMOUNT_COLUMNS:
-                cell.number_format = '#,##0.00_ '
-            elif col_name in V0_TEXT_FORMAT_COLUMNS:
-                cell.number_format = '@'
-            elif col_name == '保监征费':
-                cell.number_format = 'General'
-            elif col_name == '保额':
-                cell.number_format = 'General'
-            elif col_name == '保单号码':
-                cell_val = cell.value
-                if cell_val is None or (isinstance(cell_val, str) and cell_val.strip() == ''):
-                    cell.number_format = '@'
-                elif isinstance(cell_val, int):
-                    cell.number_format = 'General'
-                elif isinstance(cell_val, str):
-                    cell.number_format = '@'
-                else:
-                    cell.number_format = 'General'
-
-    # 列宽
-    for col_name in V0_COLUMNS:
-        idx = col_name_to_idx[col_name]
-        col_letter = get_column_letter(idx)
-        width = V0_COLUMN_WIDTHS.get(col_name, 15)
-        ws.column_dimensions[col_letter].width = width
-
-    print("   V0 sheet 格式设置完成")
-
-
-def format_v0ngp_sheet(ws, df_ngp):
-    """设置 V0-NGP sheet 的格式（与参考文件-NGP完全一致）。"""
-    print("   设置 V0-NGP sheet 格式...")
-
-    # 表头样式
-    header_font = Font(name='微软雅黑', size=11, bold=True, color='FFFFFFFF')
-    header_fill = PatternFill(start_color='FFC55A11', end_color='FFC55A11', fill_type='solid')
-    header_align_center = Alignment(horizontal='center', vertical='center')
-    header_align_right = Alignment(horizontal='right', vertical='center')
-    thin_side = Side(style='thin', color='FF000000')
-    no_side = Side(style=None)
-
-    # 表头格式
-    for col_idx, col_name in enumerate(V0_NGP_COLUMNS, start=1):
-        cell = ws.cell(1, col_idx)
-        cell.font = header_font
-        cell.fill = header_fill
-
-        # Alignment: 保费/保费港币 → right/center
-        if col_name in NGP_RIGHT_ALIGN_COLS:
-            cell.alignment = header_align_right
-        else:
-            cell.alignment = header_align_center
-
-        # Border: Col1-9 all 4 thin, Col10-14 left+right+top=thin bottom=None, Col15-39 all 4 thin
-        idx_0 = col_idx - 1  # 0-based index
-        if idx_0 in NGP_HEADER_BORDER_ALL_THIN_COLS or idx_0 in NGP_HEADER_BORDER_ALL_THIN_TAIL:
-            cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
-        elif idx_0 in NGP_HEADER_BORDER_NO_BOTTOM_COLS:
-            cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=no_side)
-
-        # Number format
-        cell.number_format = NGP_HEADER_NUMBER_FORMATS.get(col_name, "General")
-
-    # 数据行样式
-    data_font = Font(name='微软雅黑', size=11)
-    data_align_center = Alignment(horizontal='center', vertical='center')
-    data_align_right = Alignment(horizontal='right', vertical='center')
-    data_align_left = Alignment(horizontal='left', vertical='center')
-    no_border = Border()
-
-    # 设置数据行格式
-    total_rows = df_ngp.shape[0] + 1
-
-    for row_idx in range(2, total_rows + 1):
-        for col_idx, col_name in enumerate(V0_NGP_COLUMNS, start=1):
-            cell = ws.cell(row_idx, col_idx)
-            cell.font = data_font
-            cell.border = no_border
-
-            # Alignment
-            if col_name in NGP_RIGHT_ALIGN_COLS:
-                cell.alignment = data_align_right
-            elif col_name in NGP_LEFT_ALIGN_COLS:
-                cell.alignment = data_align_left
-            else:
-                cell.alignment = data_align_center
-
-            # Number format
-            cell.number_format = NGP_DATA_NUMBER_FORMATS.get(col_name, "General")
-
-    # 行高 (全部16.5)
-    for row_idx in range(1, total_rows + 1):
-        ws.row_dimensions[row_idx].height = 16.5
-
-    # 列宽
-    for col_idx, col_name in enumerate(V0_NGP_COLUMNS, start=1):
-        col_letter = get_column_letter(col_idx)
-        ws.column_dimensions[col_letter].width = NGP_COLUMN_WIDTHS.get(col_name, 13.00)
-
-    print("   V0-NGP sheet 格式设置完成")
-
-
-# ============================================================
-# 写入 Sheet 数据
-# ============================================================
-
-def write_v0_data(ws, df_v0):
-    """将 V0 数据写入 worksheet。"""
-    print("   写入 V0 数据...")
-    # 表头
-    for col_idx, col_name in enumerate(V0_COLUMNS, 1):
-        ws.cell(row=1, column=col_idx, value=col_name)
-
-    # 数据行
-    for row_idx, (_, row) in enumerate(df_v0.iterrows(), 2):
-        for col_idx, col_name in enumerate(V0_COLUMNS, 1):
-            val = row[col_name]
-            if pd.isna(val):
-                ws.cell(row=row_idx, column=col_idx)  # 空单元格
-            else:
-                ws.cell(row=row_idx, column=col_idx, value=val)
-
-    print(f"   写入 {df_v0.shape[0]} 行数据")
-
-
-def write_v0ngp_data(ws, df_ngp):
-    """将 V0-NGP 数据写入 worksheet。"""
-    print("   写入 V0-NGP 数据...")
-    # 表头
-    for col_idx, col_name in enumerate(V0_NGP_COLUMNS, start=1):
-        ws.cell(row=1, column=col_idx, value=col_name)
-
-    # 数据行
-    for row_idx, (_, row_data) in enumerate(df_ngp.iterrows(), start=2):
-        for col_idx, col_name in enumerate(V0_NGP_COLUMNS, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx)
-            value = row_data[col_name]
-            if pd.isna(value):
-                cell.value = None
-            elif isinstance(value, pd.Timestamp):
-                cell.value = value.to_pydatetime()
-            elif str(value) == '0' and col_name in ["签单供应商", "业务细分", "市场分层",
-                                                       "保险公司", "KEY ACCOUNT", "合作伙伴",
-                                                       "产品名称", "币种",
-                                                       "投保人  (中文)", "预约备注", "所签地区",
-                                                       "受保人(中文）", "投保人国籍", "备注", "TR"]:
-                cell.value = 0
-            elif str(value) == '00:00:00' and col_name in ["提交日期", "签单日期", "批核日（年/月/日）", "所签地区", "受保人(中文）"]:
-                cell.value = str(value)
-            else:
-                cell.value = value
-
-    print(f"   写入 {df_ngp.shape[0]} 行数据")
 
 
 # ============================================================
@@ -1737,6 +1498,309 @@ def _com_write_sheet(ws, df, ncols_ref, chunk=1000):
         ws.Application.CutCopyMode = False
 
 
+def _recalc_and_save(excel_app, wb, method='full', save=True):
+    import time as _time_r
+    if method == 'full':
+        try:
+            excel_app.Calculation = -4105
+        except Exception:
+            pass
+        _time_r.sleep(0.5)
+        try:
+            excel_app.CalculateFullRebuild()
+        except Exception:
+            _time_r.sleep(1)
+            try:
+                excel_app.CalculateFull()
+            except Exception:
+                pass
+    else:
+        try:
+            excel_app.Calculate()
+        except Exception:
+            try:
+                excel_app.CalculateFullRebuild()
+            except Exception:
+                pass
+    for _ in range(30):
+        try:
+            if excel_app.CalculationState == 0:
+                break
+        except Exception:
+            pass
+        _time_r.sleep(0.5)
+    _time_r.sleep(1)
+    if save:
+        wb.Save()
+
+
+def _count_formulas_and_errors(wb, skip_sheets=('V0', 'V0-NGP')):
+    ERROR_STRINGS = {'#N/A', '#VALUE!', '#REF!', '#DIV/0!', '#NAME?',
+                     '#NUM!', '#NULL!', '#CALC!', '#SPILL!', '#GETTING_DATA'}
+    total_formulas = 0
+    total_errors = 0
+    result_rows = []
+    for i in range(1, wb.Worksheets.Count + 1):
+        name = wb.Worksheets(i).Name
+        if name in skip_sheets:
+            continue
+        try:
+            ws = wb.Worksheets(name)
+            used = ws.UsedRange
+            rows_count = used.Rows.Count
+            cols_count = used.Columns.Count
+            if rows_count == 0 or cols_count == 0:
+                continue
+            formula_count = 0
+            try:
+                formula_range = used.SpecialCells(-4123)
+                for ai in range(1, formula_range.Areas.Count + 1):
+                    a = formula_range.Areas(ai)
+                    formula_count += a.Rows.Count * a.Columns.Count
+            except Exception:
+                pass
+            error_count = 0
+            try:
+                error_cells = used.SpecialCells(-4123, 16)
+                for ai in range(1, error_cells.Areas.Count + 1):
+                    a = error_cells.Areas(ai)
+                    error_count += a.Rows.Count * a.Columns.Count
+            except Exception:
+                pass
+            total_formulas += formula_count
+            total_errors += error_count
+            status = "✅" if error_count == 0 else "⚠️"
+            result_rows.append((status, name, formula_count, error_count))
+        except Exception as e:
+            result_rows.append(("⚠️", name, 0, 0))
+    return total_formulas, total_errors, result_rows
+
+
+def _fix_spill_date_formats(wb, df_v0, skip_sheets=('V0', 'V0-NGP')):
+    try:
+        import pandas as _pd_spill
+    except Exception:
+        _pd_spill = None
+    _date_col_names = set()
+    if _pd_spill is not None:
+        for _ci in range(df_v0.shape[1]):
+            try:
+                if _pd_spill.api.types.is_datetime64_any_dtype(df_v0.iloc[:, _ci]):
+                    _date_col_names.add(str(df_v0.columns[_ci]))
+            except Exception:
+                pass
+    _spill_fmt_fixed = 0
+    for _sn in wb.Worksheets:
+        _sn_name = _sn.Name
+        if _sn_name in skip_sheets:
+            continue
+        try:
+            _ur = _sn.UsedRange
+            _uc = _ur.Columns.Count
+            _ur_rows = _ur.Rows.Count
+            if _uc <= 0 or _ur_rows <= 0:
+                continue
+            for _ci in range(_uc):
+                _hdr_val = _sn.Cells(1, _ci + 1).Value
+                if _hdr_val is not None and str(_hdr_val) in _date_col_names:
+                    continue
+                _nf = str(_sn.Cells(2, _ci + 1).NumberFormat).lower()
+                if ('yy' in _nf) and ('d' in _nf or 'm' in _nf):
+                    _sn.Range(_sn.Cells(2, _ci + 1), _sn.Cells(_ur_rows, _ci + 1)).NumberFormat = '@'
+                    _spill_fmt_fixed += 1
+        except Exception:
+            pass
+    return _spill_fmt_fixed, sorted(_date_col_names)
+
+
+def _export_sunlife(excel_app, wb_out, output_dir, today_str):
+    try:
+        from pathlib import Path
+        _yongming_path = str(Path(output_dir) / f'永明业绩数据-{today_str}.xlsx')
+        ws_sunlife = wb_out.Worksheets("V0-SunLife")
+        ws_sunlife.Copy()
+        _new_wb_ym = excel_app.ActiveWorkbook
+        _new_wb_ym.Worksheets(1).Name = "Sheet1"
+        _new_ws_ym = _new_wb_ym.Worksheets(1)
+        _used_ym = _new_ws_ym.UsedRange
+        _used_ym.Copy()
+        _used_ym.PasteSpecial(Paste=-4163)
+        excel_app.CutCopyMode = False
+        _new_ws_ym.Activate()
+        excel_app.ActiveWindow.Zoom = 100
+        _new_wb_ym.SaveAs(_yongming_path, FileFormat=51)
+        _new_wb_ym.Close(False)
+        print(f"      ✅ 已另存: 永明业绩数据-{today_str}.xlsx（保留格式，0公式）")
+        return True
+    except Exception as e:
+        print(f"      ⚠️ 另存 V0-SunLife 失败: {e}")
+        return False
+
+
+def _export_iyb_report(excel_app, wb_out, output_dir, today_str):
+    try:
+        import shutil as _shutil_iyb
+        from pathlib import Path
+        _iyb_path = str(Path(output_dir) / f'IYB业绩追踪周报-{today_str}.xlsx')
+        _iyb_tmpl = None
+        for _cand in Path(output_dir).glob('IYB业绩追踪周报-*.xlsx'):
+            if today_str not in _cand.name:
+                _iyb_tmpl = str(_cand)
+                break
+        if _iyb_tmpl:
+            print(f"      📂 模板: {Path(_iyb_tmpl).name}")
+            _shutil_iyb.copy2(_iyb_tmpl, _iyb_path)
+            _wb_iyb = excel_app.Workbooks.Open(_iyb_path, UpdateLinks=0, ReadOnly=False)
+            for _sn_del in ['透视表', '业务架构2025']:
+                try:
+                    _wb_iyb.Worksheets(_sn_del).Delete()
+                except Exception:
+                    pass
+            _v0_ws_iyb = _wb_iyb.Worksheets("V0")
+            _v0_ws_iyb.UsedRange.ClearContents()
+            wb_out.Worksheets("V0-IYB业绩").UsedRange.Copy()
+            _v0_ws_iyb.Range("A1").PasteSpecial(Paste=-4104)
+            excel_app.CutCopyMode = False
+            _used_iyb = _v0_ws_iyb.UsedRange
+            _used_iyb.Copy()
+            _used_iyb.PasteSpecial(Paste=-4163)
+            excel_app.CutCopyMode = False
+            excel_app.Calculate()
+            for _ws_i in _wb_iyb.Worksheets:
+                try:
+                    _ws_i.Activate()
+                    excel_app.ActiveWindow.Zoom = 100
+                except Exception:
+                    pass
+            _wb_iyb.Save()
+            _wb_iyb.Close(False)
+            print(f"      ✅ 已另存: IYB业绩追踪周报-{today_str}.xlsx（V0+V2+匹配表）")
+        else:
+            print(f"      ⚠️ 未找到 IYB 周报模板，仅输出 V0 sheet")
+            ws_iyb = wb_out.Worksheets("V0-IYB业绩")
+            ws_iyb.Copy()
+            _new_wb_iyb = excel_app.ActiveWorkbook
+            _new_wb_iyb.Worksheets(1).Name = "V0"
+            _new_ws_iyb = _new_wb_iyb.Worksheets(1)
+            _used_iyb = _new_ws_iyb.UsedRange
+            _used_iyb.Copy()
+            _used_iyb.PasteSpecial(Paste=-4163)
+            excel_app.CutCopyMode = False
+            _new_ws_iyb.Activate()
+            excel_app.ActiveWindow.Zoom = 100
+            _new_wb_iyb.SaveAs(_iyb_path, FileFormat=51)
+            _new_wb_iyb.Close(False)
+            print(f"      ✅ 已另存: IYB业绩追踪周报-{today_str}.xlsx（仅V0）")
+        return True
+    except Exception as e:
+        print(f"      ⚠️ 另存 V0-IYB业绩 失败: {e}")
+        return False
+
+
+def _com_clear_spilled_errors(wb_out, non_data_sheets, com_retry):
+    """清理 spilled 范围错误值。"""
+    cleared_count = 0
+    for sheet_name in non_data_sheets:
+        try:
+            ws = com_retry(lambda: wb_out.Worksheets(sheet_name))
+            used = com_retry(lambda: ws.UsedRange)
+            if com_retry(lambda: used.Rows.Count) == 0 or com_retry(lambda: used.Columns.Count) == 0:
+                continue
+            try:
+                def clear_errors():
+                    error_cells = used.SpecialCells(2, 16)
+                    cnt = error_cells.Count
+                    error_cells.ClearContents()
+                    return cnt
+                sheet_cleared = com_retry(clear_errors, max_retries=3, delay=5)
+                cleared_count += sheet_cleared
+                if sheet_cleared > 0:
+                    print(f"      {sheet_name}: 清除{sheet_cleared}个错误值")
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"      ⚠️ {sheet_name}: 清理失败 - {e}")
+    return cleared_count
+
+
+def _com_fix_div_formulas(wb_out, non_data_sheets, com_retry):
+    """修复 #DIV/0! 除法公式（包裹 IFERROR）+ 清理 DISPIMG 公式。"""
+    import re
+    _DIV_RE = re.compile(r'^=[A-Za-z]+[0-9]+/[A-Za-z]+[0-9]+$')
+    div_fixed = 0
+    dispimg_cleared = 0
+
+    for sheet_name in non_data_sheets:
+        try:
+            ws_d = com_retry(lambda: wb_out.Worksheets(sheet_name))
+            used_d = com_retry(lambda: ws_d.UsedRange)
+            try:
+                err_cells = com_retry(lambda: used_d.SpecialCells(-4123, 16))
+            except Exception:
+                continue
+            areas_count = err_cells.Areas.Count
+            for ai in range(1, areas_count + 1):
+                area = err_cells.Areas(ai)
+                rows = area.Rows.Count
+                cols = area.Columns.Count
+                if rows > 5000 or cols > 500:
+                    continue
+                for rr in range(1, rows + 1):
+                    for cc in range(1, cols + 1):
+                        try:
+                            cell = area.Cells(rr, cc)
+                            fs = str(cell.Formula)
+                        except Exception:
+                            continue
+                        if not fs:
+                            continue
+                        if _DIV_RE.match(fs):
+                            try:
+                                cell.Formula = '=IFERROR(' + fs[1:] + ',0)'
+                                div_fixed += 1
+                            except Exception:
+                                pass
+                        elif 'DISPIMG' in fs.upper():
+                            try:
+                                cell.Clear()
+                                dispimg_cleared += 1
+                            except Exception:
+                                pass
+        except Exception as e:
+            print(f"      ⚠️ {sheet_name}: 公式修复失败 - {e}")
+    return div_fixed, dispimg_cleared
+
+
+def _com_fix_merge_na(wb_out, com_retry):
+    """修复 V0-合并表 E列 #N/A（IFERROR 包裹 CHOOSE/MATCH）。"""
+    import re
+    try:
+        ws_merge = com_retry(lambda: wb_out.Worksheets("V0-合并表"))
+        e3s = str(com_retry(lambda: ws_merge.Range("E3").Formula))
+        if e3s and 'CHOOSE(' in e3s and 'IFERROR(' not in e3s.upper():
+            idx = e3s.find('CHOOSE(')
+            prefix = e3s[:idx]
+            choose_part = e3s[idx:-1]
+            m = re.search(r'F(\d+)=', prefix)
+            if m:
+                frow = m.group(1)
+                new_e = prefix + 'IFERROR(' + choose_part + ',F' + frow + '))'
+                last_row_merge = com_retry(lambda: ws_merge.UsedRange.Rows.Count)
+                try:
+                    ws_merge.Range(ws_merge.Cells(3, 5), ws_merge.Cells(last_row_merge, 5)).Formula = new_e
+                    print(f"      已将 E3:E{last_row_merge} 的 CHOOSE/MATCH 包裹 IFERROR")
+                    return True
+                except Exception as fe:
+                    print(f"      ⚠️ 写入E列公式失败: {fe}")
+            else:
+                print("      ⚠️ 无法从 E3 公式提取行号")
+        else:
+            print("      E3 公式已含 IFERROR 或无 CHOOSE，跳过")
+    except Exception as e:
+        print(f"      ⚠️ V0-合并表 E列修复失败: {e}")
+    return False
+
+
 def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=None,
                               reference_file_path=None, output_dir=None):
     """统一生成业绩数据-整合文件（含V0和V0-NGP两个sheet）。
@@ -1806,9 +1870,6 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
     # ---- Part 2: 处理V0-NGP数据 ----
     df_ngp = process_v0ngp_data(ngp_file_path, mapping_table_path)
 
-    # ---- Part 2b 已移除：不再将 V0-NGP 数据合并到 V0 ----
-    # V0 Sheet 仅包含综合查询数据（已删除永领致远）
-    # V0-NGP Sheet 仍独立保留，包含全部 NGP 数据（含永领致远）
     print()
     print("   V0 Sheet 仅使用综合查询数据，不合并 V0-NGP")
     print(f"   V0 数据: {df_v0.shape[0]} 行 × {df_v0.shape[1]} 列（综合查询，已删除永领致远）")
@@ -1836,56 +1897,53 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
     #    然后直接保存——Excel COM 会同时保存公式和缓存值
     #    （不转静态值，保留公式引用 V0/V0-NGP 的结构，与参考文件一致）
 
-    # Step 1: 用 openpyxl 创建输出文件（替换 V0/V0-NGP）
-    # 先清理可能残留的 Excel 进程，避免文件锁定
-    import subprocess as _subproc
+    # Step 1: 复制参考文件作为基础（保留其他 sheet 公式结构）
+    print("📋 复制参考文件作为基础（保留其他 sheet 公式结构，不经由 openpyxl 改写以避免破坏动态数组）...")
+    out_p = Path(output_file_path)
+    
+    import subprocess
+    import time as _time
+    
+    for attempt in range(5):
+        try:
+            if attempt > 0:
+                subprocess.run('taskkill /F /IM EXCEL.EXE', capture_output=True, shell=True)
+                _time.sleep(2)
+            
+            if out_p.exists():
+                try:
+                    out_p.unlink()
+                except Exception:
+                    pass
+            
+            shutil.copy2(str(reference_file_path), output_file_path)
+            print(f"   已复制参考文件 -> {output_file_path}")
+            print("   （V0 / V0-NGP 数据将在下方的 Excel COM 阶段写入，其他 sheet 公式结构原样保留）")
+            break
+        except PermissionError as e:
+            if attempt < 4:
+                print(f"   ⚠️ 文件被占用，重试 {attempt + 1}/5: {e}")
+                _time.sleep(3)
+            else:
+                raise e
+
+    # Step 2: 用 Excel COM 写入 V0/V0-NGP 数据 + 重算公式并保存缓存值
+    print()
+    print("🔄 使用 Excel COM 写入 V0/V0-NGP 数据 + 重算公式（保留公式结构）...")
+    
+    import subprocess
+    import win32com.client as win32
+    import pythoncom
+    import time as _time
+    import re
+    
     try:
-        _subproc.run('taskkill /F /IM EXCEL.EXE', capture_output=True, shell=True)
-        import time as _pre_time
-        _pre_time.sleep(1)
+        subprocess.run('taskkill /F /IM EXCEL.EXE', capture_output=True, shell=True)
+        _time.sleep(2)
     except Exception:
         pass
 
-    print("📋 复制参考文件作为基础（保留其他 sheet 公式结构，不经由 openpyxl 改写以避免破坏动态数组）...")
-    out_p = Path(output_file_path)
-    if out_p.exists():
-        try:
-            out_p.unlink()
-        except Exception:
-            pass
-    shutil.copy2(str(reference_file_path), output_file_path)
-    print(f"   已复制参考文件 -> {output_file_path}")
-    print("   （V0 / V0-NGP 数据将在下方的 Excel COM 阶段写入，其他 sheet 公式结构原样保留）")
-
-    # 不再经由 openpyxl 改写公式 sheet 的 XML
-    # 参考 V0 经确认是纯数据表（0个公式单元格），整体替换安全
-    # 参考 V0-NGP 同理是纯数据表
-    # 公式 sheet 的动态数组结构（_xlfn. 前缀 + t="array"）字节级保留，
-    # 仅在下方的 Excel COM 阶段替换 V0/V0-NGP 数据值
-
-    # Step 2: 用 Excel COM 写入 V0/V0-NGP 数据 + 重算公式并保存缓存值
-    # 核心逻辑：
-    #   1. 参考文件已字节级复制（shutil.copy2），公式 sheet XML 原样保留
-    #   2. Excel COM 打开文件 → 仅替换 V0/V0-NGP 的数据值（纯数据表，无公式）
-    #   3. CalculateFullRebuild() 基于 V0/V0-NGP 新数据重算所有公式
-    #   4. 保存——Excel COM 同时保存公式和缓存值
-    #   5. 公式引用 V0/V0-NGP 的结构完整保留，值基于 0717 新数据计算
-    print()
-    print("🔄 使用 Excel COM 写入 V0/V0-NGP 数据 + 重算公式（保留公式结构）...")
     try:
-        import win32com.client as win32
-        import pythoncom
-        import time as _time
-        import subprocess
-
-        # 先清理可能残留的 Excel 进程
-        try:
-            subprocess.run('taskkill /F /IM EXCEL.EXE', capture_output=True, shell=True)
-            _time.sleep(2)
-        except Exception:
-            pass
-
-        # 使用 DispatchEx 创建独立的新进程（而非复用已有实例）
         excel_app = win32.DispatchEx("Excel.Application")
         excel_app.Visible = False
         excel_app.DisplayAlerts = False
@@ -1895,7 +1953,6 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
         out_resolved = str(Path(output_file_path).resolve())
         print(f"   📂 打开文件: {out_resolved}")
 
-        # 重试打开文件（Workbooks.Open 可能因 Excel 初始化未完成而失败）
         wb_out = None
         for attempt in range(5):
             try:
@@ -1909,130 +1966,44 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
                 else:
                     raise open_err
 
-        # ---- 写入 V0 数据 ----
+        # ---- 写入 V0/V0-NGP/V0-IYB业绩 数据 ----
         print("   📝 写入 V0 数据...")
         ws_v0 = wb_out.Worksheets("V0")
-        ncols_v0_ref = ws_v0.UsedRange.Columns.Count
-        print(f"      V0 参考列数: {ncols_v0_ref}, 新数据: {df_v0.shape[0]}行×{df_v0.shape[1]}列")
-        _com_write_sheet(ws_v0, df_v0, ncols_v0_ref, chunk=1000)
+        _com_write_sheet(ws_v0, df_v0, ws_v0.UsedRange.Columns.Count, chunk=1000)
         print("      ✅ V0 数据写入完成")
 
-        # ---- 写入 V0-NGP 数据 ----
         print("   📝 写入 V0-NGP 数据...")
         ws_ngp = wb_out.Worksheets("V0-NGP")
-        ncols_ngp_ref = ws_ngp.UsedRange.Columns.Count
-        print(f"      V0-NGP 参考列数: {ncols_ngp_ref}, 新数据: {df_ngp.shape[0]}行×{df_ngp.shape[1]}列")
-        _com_write_sheet(ws_ngp, df_ngp, ncols_ngp_ref, chunk=1000)
+        _com_write_sheet(ws_ngp, df_ngp, ws_ngp.UsedRange.Columns.Count, chunk=1000)
         print("      ✅ V0-NGP 数据写入完成")
 
-        # ---- 写入 V0-IYB业绩 数据 ----
         print("   📝 写入 V0-IYB业绩 数据...")
         try:
             ws_iyb = wb_out.Worksheets("V0-IYB业绩")
-            ncols_iyb_ref = ws_iyb.UsedRange.Columns.Count
-            print(f"      V0-IYB业绩 参考列数: {ncols_iyb_ref}, 新数据: {df_iyb.shape[0]}行×{df_iyb.shape[1]}列")
-            _com_write_sheet(ws_iyb, df_iyb, ncols_iyb_ref, chunk=1000)
+            _com_write_sheet(ws_iyb, df_iyb, ws_iyb.UsedRange.Columns.Count, chunk=1000)
             print("      ✅ V0-IYB业绩 数据写入完成")
-
-            # 防御性修复：参考模板的 G2/H2 公式使用 $J$1:$J$10 等过小查找范围，
-            # 导致 '天领业务'/'成事家办'/'永明经代' 等值（位于第 10 行之后）找不到匹配。
-            # 此处自动将所有 XLOOKUP 公式的短范围替换为完整列引用（J:J、H:H、I:I）。
-            print("   🔧 防御性修复 V0-IYB业绩 G/H 列 XLOOKUP 公式（防止短范围查找）...")
-            try:
-                _formula_fixed = _fix_iyb_xlookup_formulas(ws_iyb, df_iyb.shape[0])
-                print(f"      修复公式单元格: {_formula_fixed} 个（G/H 列 XLOOKUP 短范围→完整列）")
-            except Exception as _fix_err:
-                print(f"      ⚠️ 修复公式时异常: {_fix_err}")
+            print("   🔧 防御性修复 V0-IYB业绩 G/H 列 XLOOKUP 公式...")
+            _formula_fixed = _fix_iyb_xlookup_formulas(ws_iyb, df_iyb.shape[0])
+            print(f"      修复公式单元格: {_formula_fixed} 个")
         except Exception as e_iyb:
             print(f"      ⚠️ V0-IYB业绩 sheet 写入失败: {e_iyb}")
 
-        # 保存数据写入结果（防止后续重算崩溃丢失数据）
         print("   💾 保存数据写入结果...")
         wb_out.Save()
 
-        # 修复 spill sheet (2025/2026/未批核等) 中"非日期列误设日期格式"的问题
-        # spill sheet 格式继承自参考模板，部分文本/数值列(快递单号/投保人证件号等)误设为日期格式，
-        # 导致 spill 的数字型值按日期序列号显示→#VALUE!
-        # 重要：必须按列名判断而非列索引，因为 V0-IYB业绩/V0-SunLife 等非镜像 sheet 的列结构与 V0 不同，
-        # 按索引会将 IYB 的"提交日期"(idx=1)误判为非日期列（V0 idx=1 是"订单编号"），从而错误地将其格式从 yyyy/m/d;@ 改为 @。
+        # ---- 修复 spill sheet 日期格式错配 ----
         print("   🔧 修复 spill sheet 日期格式错配（按列名而非索引）...")
-        try:
-            import pandas as _pd_spill
-        except Exception:
-            _pd_spill = None
-        _date_col_names = set()
-        if _pd_spill is not None:
-            for _ci in range(df_v0.shape[1]):
-                try:
-                    if _pd_spill.api.types.is_datetime64_any_dtype(df_v0.iloc[:, _ci]):
-                        _date_col_names.add(str(df_v0.columns[_ci]))
-                except Exception:
-                    pass
-        _spill_fmt_fixed = 0
-        for _sn in wb_out.Worksheets:
-            _sn_name = _sn.Name
-            if _sn_name in ('V0', 'V0-NGP'):
-                continue  # V0/V0-NGP 已在 _com_write_sheet 中处理
-            try:
-                _ur = _sn.UsedRange
-                _uc = _ur.Columns.Count
-                _ur_rows = _ur.Rows.Count
-                if _uc <= 0 or _ur_rows <= 0:
-                    continue
-                # 读取该 sheet 表头行（row 1），按列名判断是否为日期列
-                for _ci in range(_uc):
-                    _hdr_val = _sn.Cells(1, _ci + 1).Value
-                    if _hdr_val is not None and str(_hdr_val) in _date_col_names:
-                        continue  # 表头名在日期列集合中，保留其日期格式
-                    _nf = str(_sn.Cells(2, _ci + 1).NumberFormat).lower()
-                    if ('yy' in _nf) and ('d' in _nf or 'm' in _nf):
-                        _sn.Range(_sn.Cells(2, _ci + 1), _sn.Cells(_ur_rows, _ci + 1)).NumberFormat = '@'
-                        _spill_fmt_fixed += 1
-            except Exception:
-                pass
+        _spill_fmt_fixed, _date_col_names = _fix_spill_date_formats(wb_out, df_v0)
         print(f"      共修复 {_spill_fmt_fixed} 个 spill sheet 非日期列的日期格式")
-        print(f"      日期列名集合（不受格式修复影响）: {sorted(_date_col_names)}")
+        print(f"      日期列名集合: {_date_col_names}")
 
-        # 直接使用 CalculateFullRebuild 重算所有公式
-        # CSE 公式 (t="array") 会在其固定 ref 范围内正确重算
-        # FILTER/VSTACK 在 CSE 范围内工作正常，多余单元格的 #N/A 与参考文件行为一致
-        # 注意：不要转换为普通公式字符串——Excel 365 会自动添加 @ 运算符抑制 spill
-        print("   📊 正在重算所有公式（CalculateFullRebuild，基于新 V0/V0-NGP 数据）...")
-        try:
-            excel_app.Calculation = -4105  # xlCalculationAutomatic
-        except Exception:
-            pass  # 如果无法设置，直接调用 CalculateFullRebuild
-        _time.sleep(1)
-        try:
-            excel_app.CalculateFullRebuild()
-        except Exception as calc_err:
-            print(f"   ⚠️ CalculateFullRebuild 失败，尝试 CalculateFull: {calc_err}")
-            _time.sleep(3)
-            try:
-                excel_app.CalculateFull()
-            except Exception:
-                pass
-        # 等待计算完成
-        for _ in range(120):  # 最多等 60 秒
-            try:
-                if excel_app.CalculationState == 0:  # xlDone = 0
-                    break
-            except Exception:
-                pass
-            _time.sleep(0.5)
-        _time.sleep(3)  # 额外等待 Excel 空闲，确保 spill 完成
+        # ---- 第一轮重算所有公式 ----
+        print("   📊 正在重算所有公式（CalculateFullRebuild）...")
+        _recalc_and_save(excel_app, wb_out, method='full')
+        print("   💾 第一轮重算完成，缓存值已保存")
 
-        # 立即保存（确保缓存值写入文件，即使后续清理操作导致 Excel 崩溃）
-        print("   💾 第一轮重算完成，立即保存缓存值...")
-        wb_out.Save()
-
-        # V0-IYB业绩 端口/分层空值兜底（关键防御层）：
-        # 即使 G2/H2 公式已修复为完整列引用，FILTER spill 仍可能因
-        # spill 条件（Q<>"" AND S<>"利泰丰" AND L<>"天誉国际..."）
-        # 对部分行无匹配（如 row 1319+），导致 spill 区域末尾保持空字符串，
-        # XLOOKUP 查找值为空 → 返回空。此函数作为最后兜底：
-        # 用 IYB_PORT_MAP/IYB_SEGMENT_MAP 直接写入端口/分层值。
-        print("   🛡️ V0-IYB业绩 端口/分层空值兜底验证（防 FILTER spill 不完全）...")
+        # ---- V0-IYB业绩 端口/分层空值兜底 ----
+        print("   🛡️ V0-IYB业绩 端口/分层空值兜底验证...")
         try:
             _ws_iyb_check = wb_out.Worksheets("V0-IYB业绩")
             _backfilled = _verify_iyb_port_layer(_ws_iyb_check, df_iyb.shape[0], df_iyb)
@@ -2040,79 +2011,18 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
                 print(f"      兜底写入: {_backfilled} 行端口/分层值")
                 wb_out.Save()
             else:
-                print(f"      ✅ 无空值（XLOOKUP 公式 + FILTER spill 已覆盖全部数据行）")
+                print(f"      ✅ 无空值")
         except Exception as _bf_err:
             print(f"      ⚠️ 兜底验证异常: {_bf_err}")
 
-        # 统计各 sheet 公式数量和错误值
+        # ---- 公式重算结果统计 ----
         print("   📋 公式重算结果统计:")
-        ERROR_STRINGS = {'#N/A', '#VALUE!', '#REF!', '#DIV/0!', '#NAME?',
-                         '#NUM!', '#NULL!', '#CALC!', '#SPILL!', '#GETTING_DATA'}
-        sheets_to_process = []
-        for i in range(1, wb_out.Worksheets.Count + 1):
-            name = wb_out.Worksheets(i).Name
-            if name not in ('V0', 'V0-NGP'):
-                sheets_to_process.append(name)
-
-        total_formulas = 0
-        total_errors = 0
-        for sheet_name in sheets_to_process:
-            try:
-                ws = wb_out.Worksheets(sheet_name)
-                used = ws.UsedRange
-                rows_count = used.Rows.Count
-                cols_count = used.Columns.Count
-                if rows_count == 0 or cols_count == 0:
-                    continue
-
-                # 统计公式数量
-                formula_count = 0
-                try:
-                    formula_range = used.SpecialCells(-4123)  # xlFormulas
-                    for ai in range(1, formula_range.Areas.Count + 1):
-                        a = formula_range.Areas(ai)
-                        formula_count += a.Rows.Count * a.Columns.Count
-                except Exception:
-                    pass
-
-                # 统计错误值
-                error_count = 0
-                raw_values = used.Value
-                if raw_values is not None:
-                    if rows_count == 1 and cols_count == 1:
-                        values_2d = [[raw_values]]
-                    elif rows_count == 1:
-                        values_2d = [list(raw_values)]
-                    elif cols_count == 1:
-                        values_2d = [[v] for v in raw_values]
-                    else:
-                        values_2d = [list(row) for row in raw_values]
-                    for i_row in range(len(values_2d)):
-                        for j_col in range(len(values_2d[i_row])):
-                            v = values_2d[i_row][j_col]
-                            if v is None:
-                                continue
-                            if isinstance(v, int) and -2146826300 <= v <= -2146826200:
-                                error_count += 1
-                            elif isinstance(v, str):
-                                s = v.strip()
-                                if s in ERROR_STRINGS or (s.startswith('#') and (s.endswith('!') or s.endswith('?'))):
-                                    error_count += 1
-
-                total_formulas += formula_count
-                total_errors += error_count
-                status = "✅" if error_count == 0 else "⚠️"
-                print(f"      {status} {sheet_name}: {formula_count}个公式, {error_count}个错误值")
-            except Exception as e:
-                print(f"      ⚠️ {sheet_name}: 统计失败 - {e}")
-
+        total_formulas, total_errors, result_rows = _count_formulas_and_errors(wb_out)
+        for status, name, fc, ec in result_rows:
+            print(f"      {status} {name}: {fc}个公式, {ec}个错误值")
         print(f"   总计: {total_formulas}个公式, {total_errors}个错误值")
 
-        # 尝试清理 spilled 范围中的错误值并重新计算
-        # 如果此步骤导致 Excel 崩溃，文件已保存第一轮重算结果，不影响最终输出
-
         def com_retry(func, max_retries=5, delay=3):
-            """COM 调用重试包装器"""
             for attempt in range(max_retries):
                 try:
                     return func()
@@ -2124,166 +2034,45 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
                         raise e
 
         try:
+            sheets_to_process = [wb_out.Worksheets(i).Name for i in range(1, wb_out.Worksheets.Count + 1)
+                                 if wb_out.Worksheets(i).Name not in ('V0', 'V0-NGP')]
+
+            # ---- 清理 spilled 范围错误值 ----
             print("   🧹 清理 spilled 范围错误值...")
-            _time.sleep(3)  # 等待 Excel 空闲
-            cleared_count = 0
-            for sheet_name in sheets_to_process:
-                try:
-                    ws = com_retry(lambda: wb_out.Worksheets(sheet_name))
-                    used = com_retry(lambda: ws.UsedRange)
-                    rows_count = com_retry(lambda: used.Rows.Count)
-                    cols_count = com_retry(lambda: used.Columns.Count)
-                    if rows_count == 0 or cols_count == 0:
-                        continue
-
-                    # 使用 SpecialCells 高效清除错误常量（非公式错误单元格）
-                    # xlCellTypeConstants=2, xlErrors=16
-                    sheet_cleared = 0
-                    try:
-                        def clear_errors():
-                            error_cells = used.SpecialCells(2, 16)
-                            cnt = error_cells.Count
-                            error_cells.ClearContents()
-                            return cnt
-                        sheet_cleared = com_retry(clear_errors, max_retries=3, delay=5)
-                    except Exception:
-                        pass  # 无错误常量或 SpecialCells 失败
-
-                    cleared_count += sheet_cleared
-                    if sheet_cleared > 0:
-                        print(f"      {sheet_name}: 清除{sheet_cleared}个错误值")
-                except Exception as e:
-                    print(f"      ⚠️ {sheet_name}: 清理失败 - {e}")
-
+            _time.sleep(1)
+            cleared_count = _com_clear_spilled_errors(wb_out, sheets_to_process, com_retry)
             print(f"      共清除 {cleared_count} 个错误值")
-
-            # 如果清除了错误值，重新计算并保存
             if cleared_count > 0:
                 print("   📊 重新计算公式...")
-                _time.sleep(2)
-                com_retry(lambda: excel_app.CalculateFullRebuild(), max_retries=3, delay=10)
-                # 等待计算完成
-                for _ in range(60):  # 最多等 60 秒
-                    try:
-                        if excel_app.CalculationState == 0:
-                            break
-                    except Exception:
-                        pass
-                    _time.sleep(1)
-                _time.sleep(3)  # 额外等待 Excel 空闲
+                _time.sleep(0.5)
+                com_retry(lambda: excel_app.CalculateFullRebuild(), max_retries=3, delay=5)
+                _recalc_and_save(excel_app, wb_out, method='normal')
 
-                # 保存重算结果
-                print("   💾 保存重算结果...")
-                wb_out.Save()
-
-            # 修复 #DIV/0! 除法公式：将简单除法公式(=XX/YY)包裹 IFERROR，消除零除错误
-            # 参考模板验证表等 sheet 的除法公式未防零除，当分母(如保单数)为0时产生 #DIV/0!
-            # 仅匹配 "=单元格引用/单元格引用" 形式(如 =BA85/AZ85)，不影响 CHOOSE/MATCH 等复杂公式
+            # ---- 修复 #DIV/0! 除法公式 + 清理 DISPIMG ----
             print("   🔧 修复 #DIV/0! 除法公式（包裹 IFERROR）+ 清理 DISPIMG 公式...")
-            _time.sleep(2)
-            import re as _re_div
-            _DIV_RE = _re_div.compile(r'^=[A-Za-z]+[0-9]+/[A-Za-z]+[0-9]+$')
-            div_fixed = 0
-            dispimg_cleared = 0
-            for sheet_name in sheets_to_process:
-                try:
-                    ws_d = com_retry(lambda: wb_out.Worksheets(sheet_name))
-                    used_d = com_retry(lambda: ws_d.UsedRange)
-                    try:
-                        err_cells = com_retry(lambda: used_d.SpecialCells(-4123, 16))  # xlCellTypeFormulas, xlErrors
-                    except Exception:
-                        continue  # 无错误公式
-                    for ai in range(1, err_cells.Areas.Count + 1):
-                        area = err_cells.Areas(ai)
-                        for rr in range(1, area.Rows.Count + 1):
-                            for cc in range(1, area.Columns.Count + 1):
-                                try:
-                                    cell = area.Cells(rr, cc)
-                                    f = cell.Formula
-                                except Exception:
-                                    continue
-                                if not f:
-                                    continue
-                                fs = str(f)
-                                if _DIV_RE.match(fs):
-                                    # 简单除法公式 → 包裹 IFERROR
-                                    try:
-                                        cell.Formula = '=IFERROR(' + fs[1:] + ',0)'
-                                        div_fixed += 1
-                                    except Exception:
-                                        pass
-                                elif 'DISPIMG' in fs.upper():
-                                    # WPS 专有图片公式（Excel 无法识别→#NAME?）→ 清除
-                                    try:
-                                        cell.Clear()
-                                        dispimg_cleared += 1
-                                    except Exception:
-                                        pass
-                except Exception as e:
-                    print(f"      ⚠️ {sheet_name}: 公式修复失败 - {e}")
+            _time.sleep(0.5)
+            div_fixed, dispimg_cleared = _com_fix_div_formulas(wb_out, sheets_to_process, com_retry)
             print(f"      共修复 {div_fixed} 个 #DIV/0! 除法公式, 清理 {dispimg_cleared} 个 DISPIMG 公式")
             if div_fixed > 0 or dispimg_cleared > 0:
-                # 先保存公式修改（防止后续重算崩溃导致 IFERROR 修改丢失）
                 print("   💾 保存 IFERROR 公式修改...")
                 try:
                     wb_out.Save()
                 except Exception as e:
                     print(f"      ⚠️ 保存公式失败: {e}")
-                # 轻量重算（用 Calculate 代替 FullRebuild，降低 Excel 崩溃风险）
                 print("   📊 重新计算公式...")
-                _time.sleep(2)
                 try:
                     excel_app.Calculate()
                 except Exception:
                     try:
-                        com_retry(lambda: excel_app.CalculateFullRebuild(), max_retries=2, delay=10)
+                        com_retry(lambda: excel_app.CalculateFullRebuild(), max_retries=2, delay=5)
                     except Exception as e:
-                        print(f"      ⚠️ 重算失败（公式已保存，Excel 打开时自动重算）: {e}")
-                for _ in range(60):  # 最多等 60 秒
-                    try:
-                        if excel_app.CalculationState == 0:
-                            break
-                    except Exception:
-                        break
-                    _time.sleep(1)
-                _time.sleep(3)
-                print("   💾 保存重算结果...")
-                try:
-                    wb_out.Save()
-                except Exception as e:
-                    print(f"      ⚠️ 保存重算结果失败（公式已保存）: {e}")
+                        print(f"      ⚠️ 重算失败（公式已保存）: {e}")
+                _recalc_and_save(excel_app, wb_out, method='normal')
 
-            # 修复 V0-合并表 E列 #N/A：业务细分含"MGA业务"等不在 CHOOSE 列表中的值 → MATCH 返回 #N/A
-            # 将 CHOOSE(MATCH(...)) 包裹 IFERROR(...,F{row})，未匹配时返回 F 列值（业务细分本身作为业务大类）
+            # ---- 修复 V0-合并表 E列 #N/A ----
             print("   🔧 修复 V0-合并表 E列 #N/A（IFERROR 包裹 CHOOSE/MATCH）...")
-            _time.sleep(2)
-            merge_fixed = False
-            try:
-                ws_merge = com_retry(lambda: wb_out.Worksheets("V0-合并表"))
-                e3_f = com_retry(lambda: ws_merge.Range("E3").Formula)
-                e3s = str(e3_f)
-                if e3s and 'CHOOSE(' in e3s and 'IFERROR(' not in e3s.upper():
-                    idx = e3s.find('CHOOSE(')
-                    prefix = e3s[:idx]
-                    choose_part = e3s[idx:-1]  # 去掉末尾 IF 关闭括号
-                    import re as _re_merge
-                    m = _re_merge.search(r'F(\d+)=', prefix)
-                    if m:
-                        frow = m.group(1)
-                        new_e = prefix + 'IFERROR(' + choose_part + ',F' + frow + '))'
-                        last_row_merge = com_retry(lambda: ws_merge.UsedRange.Rows.Count)
-                        try:
-                            ws_merge.Range(ws_merge.Cells(3, 5), ws_merge.Cells(last_row_merge, 5)).Formula = new_e
-                            print(f"      已将 E3:E{last_row_merge} 的 CHOOSE/MATCH 包裹 IFERROR")
-                            merge_fixed = True
-                        except Exception as fe:
-                            print(f"      ⚠️ 写入E列公式失败: {fe}")
-                    else:
-                        print("      ⚠️ 无法从 E3 公式提取行号")
-                else:
-                    print("      E3 公式已含 IFERROR 或无 CHOOSE，跳过")
-            except Exception as e:
-                print(f"      ⚠️ V0-合并表 E列修复失败: {e}")
+            _time.sleep(0.5)
+            merge_fixed = _com_fix_merge_na(wb_out, com_retry)
             if merge_fixed:
                 print("   💾 保存 V0-合并表 修复...")
                 try:
@@ -2291,92 +2080,26 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
                 except Exception as e:
                     print(f"      ⚠️ 保存失败: {e}")
                 print("   📊 重新计算公式...")
-                _time.sleep(2)
                 try:
                     excel_app.Calculate()
                 except Exception:
                     try:
-                        com_retry(lambda: excel_app.CalculateFullRebuild(), max_retries=2, delay=10)
+                        com_retry(lambda: excel_app.CalculateFullRebuild(), max_retries=2, delay=5)
                     except Exception as e:
                         print(f"      ⚠️ 重算失败（公式已保存）: {e}")
-                for _ in range(60):
-                    try:
-                        if excel_app.CalculationState == 0:
-                            break
-                    except Exception:
-                        break
-                    _time.sleep(1)
-                _time.sleep(3)
-                try:
-                    wb_out.Save()
-                except Exception as e:
-                    print(f"      ⚠️ 保存重算结果失败: {e}")
+                _recalc_and_save(excel_app, wb_out, method='normal')
 
-            # 最终统计
+            # ---- 最终统计 ----
             print("   📋 最终公式重算结果:")
-            _time.sleep(3)
-            total_formulas = 0
-            total_errors = 0
-            for sheet_name in sheets_to_process:
-                try:
-                    ws = com_retry(lambda: wb_out.Worksheets(sheet_name))
-                    used = com_retry(lambda: ws.UsedRange)
-                    rows_count = com_retry(lambda: used.Rows.Count)
-                    cols_count = com_retry(lambda: used.Columns.Count)
-                    if rows_count == 0 or cols_count == 0:
-                        continue
-
-                    # 统计公式数量
-                    formula_count = 0
-                    try:
-                        def count_formulas():
-                            fr = used.SpecialCells(-4123)
-                            cnt = 0
-                            for ai in range(1, fr.Areas.Count + 1):
-                                a = fr.Areas(ai)
-                                cnt += a.Rows.Count * a.Columns.Count
-                            return cnt
-                        formula_count = com_retry(count_formulas, max_retries=3, delay=5)
-                    except Exception:
-                        pass
-
-                    # 统计错误值
-                    error_count = 0
-                    raw_values = com_retry(lambda: used.Value, max_retries=3, delay=5)
-                    if raw_values is not None:
-                        if rows_count == 1 and cols_count == 1:
-                            values_2d = [[raw_values]]
-                        elif rows_count == 1:
-                            values_2d = [list(raw_values)]
-                        elif cols_count == 1:
-                            values_2d = [[v] for v in raw_values]
-                        else:
-                            values_2d = [list(row) for row in raw_values]
-                        for i_row in range(len(values_2d)):
-                            for j_col in range(len(values_2d[i_row])):
-                                v = values_2d[i_row][j_col]
-                                if v is None:
-                                    continue
-                                if isinstance(v, int) and -2146826300 <= v <= -2146826200:
-                                    error_count += 1
-                                elif isinstance(v, str):
-                                    s = v.strip()
-                                    if s in ERROR_STRINGS or (s.startswith('#') and (s.endswith('!') or s.endswith('?'))):
-                                        error_count += 1
-
-                    total_formulas += formula_count
-                    total_errors += error_count
-                    status = "✅" if error_count == 0 else "⚠️"
-                    print(f"      {status} {sheet_name}: {formula_count}个公式, {error_count}个错误值")
-                except Exception as e:
-                    print(f"      ⚠️ {sheet_name}: 统计失败 - {e}")
-
+            total_formulas, total_errors, result_rows = _count_formulas_and_errors(wb_out)
+            for status, name, fc, ec in result_rows:
+                print(f"      {status} {name}: {fc}个公式, {ec}个错误值")
             print(f"   最终总计: {total_formulas}个公式, {total_errors}个错误值")
 
         except Exception as e:
             print(f"   ⚠️ 清理重算阶段失败（文件已保存第一轮重算结果）: {e}")
 
-        # 设置所有 sheet 缩放比例为 100%
+        # ---- 设置缩放比例 + 导出文件 ----
         print("   🔍 设置所有 sheet 缩放比例为 100%...")
         try:
             for _ws in wb_out.Worksheets:
@@ -2390,98 +2113,13 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
         except Exception as e:
             print(f"      ⚠️ 设置缩放比例失败: {e}")
 
-        # 将 V0-SunLife sheet 另存为"永明业绩数据-YYYYMMDD.xlsx"（保留全部格式，公式转静态值）
-        print("   📋 另存 V0-SunLife 为永明业绩数据（保留格式，公式转值）...")
-        try:
-            from datetime import datetime as _dt_exp
-            _today_str = _dt_exp.now().strftime('%Y%m%d')
-            _yongming_path = str(Path(output_file_path).parent / f'永明业绩数据-{_today_str}.xlsx')
-            # 用 COM Copy 复制整个 sheet（保留全部格式），再用 PasteSpecial 清除公式
-            ws_sunlife = wb_out.Worksheets("V0-SunLife")
-            ws_sunlife.Copy()
-            _new_wb_ym = excel_app.ActiveWorkbook
-            _new_wb_ym.Worksheets(1).Name = "Sheet1"
-            _new_ws_ym = _new_wb_ym.Worksheets(1)
-            _used_ym = _new_ws_ym.UsedRange
-            _used_ym.Copy()
-            _used_ym.PasteSpecial(Paste=-4163)  # xlPasteValuesAndNumberFormats
-            excel_app.CutCopyMode = False
-            _new_ws_ym.Activate()
-            excel_app.ActiveWindow.Zoom = 100
-            _new_wb_ym.SaveAs(_yongming_path, FileFormat=51)
-            _new_wb_ym.Close(False)
-            print(f"      ✅ 已另存: 永明业绩数据-{_today_str}.xlsx（保留格式，0公式）")
-        except Exception as e:
-            print(f"      ⚠️ 另存 V0-SunLife 失败: {e}")
+        print("   📋 另存 V0-SunLife 为永明业绩数据...")
+        _export_sunlife(excel_app, wb_out, str(Path(output_file_path).parent), today_str)
 
-        # 将 V0-IYB业绩 sheet 另存为"IYB业绩追踪周报-YYYYMMDD.xlsx"
-        # 包含 V0(数据) + V2(公式引用V0) + 匹配表(数据)
-        # 方案：复制模板→删除多余sheet(不删V0)→清除V0旧数据→填入新V0-IYB业绩数据→PasteSpecial清除公式→重算
-        # 注意：不能删除V0 sheet，否则V2公式引用V0会变成#REF!；改为ClearContents清除数据后填入新数据
-        print("   📋 另存 V0-IYB业绩 为IYB业绩追踪周报（V0+V2+匹配表）...")
-        try:
-            import shutil as _shutil_iyb
-            _iyb_path = str(Path(output_file_path).parent / f'IYB业绩追踪周报-{_today_str}.xlsx')
-            # 查找上一期 IYB 周报模板（同目录下 IYB业绩追踪周报-*.xlsx，排除当天）
-            _iyb_tmpl = None
-            for _cand in Path(output_file_path).parent.glob('IYB业绩追踪周报-*.xlsx'):
-                if _today_str not in _cand.name:
-                    _iyb_tmpl = str(_cand)
-                    break
-            if _iyb_tmpl:
-                print(f"      📂 模板: {Path(_iyb_tmpl).name}")
-                # Step1: 复制模板为新文件
-                _shutil_iyb.copy2(_iyb_tmpl, _iyb_path)
-                _wb_iyb = excel_app.Workbooks.Open(_iyb_path, UpdateLinks=0, ReadOnly=False)
-                # Step2: 删除不需要的 sheet（透视表/业务架构2025，不删V0避免#REF!）
-                for _sn_del in ['透视表', '业务架构2025']:
-                    try:
-                        _wb_iyb.Worksheets(_sn_del).Delete()
-                    except Exception:
-                        pass
-                # Step3: 清除 V0 旧数据（保留格式，V2引用不断）
-                _v0_ws_iyb = _wb_iyb.Worksheets("V0")
-                _v0_ws_iyb.UsedRange.ClearContents()
-                # Step4: 从业绩数据-整合复制 V0-IYB业绩 数据到 V0
-                wb_out.Worksheets("V0-IYB业绩").UsedRange.Copy()
-                _v0_ws_iyb.Range("A1").PasteSpecial(Paste=-4104)  # xlPasteAll
-                excel_app.CutCopyMode = False
-                # Step5: PasteSpecial V0 清除公式（只保留值+数字格式）
-                _used_iyb = _v0_ws_iyb.UsedRange
-                _used_iyb.Copy()
-                _used_iyb.PasteSpecial(Paste=-4163)  # xlPasteValuesAndNumberFormats
-                excel_app.CutCopyMode = False
-                # Step6: 重算（V2 公式引用新 V0 数据）+ 缩放 100%
-                excel_app.Calculate()
-                for _ws_i in _wb_iyb.Worksheets:
-                    try:
-                        _ws_i.Activate()
-                        excel_app.ActiveWindow.Zoom = 100
-                    except Exception:
-                        pass
-                _wb_iyb.Save()
-                _wb_iyb.Close(False)
-                print(f"      ✅ 已另存: IYB业绩追踪周报-{_today_str}.xlsx（V0+V2+匹配表）")
-            else:
-                print(f"      ⚠️ 未找到 IYB 周报模板，仅输出 V0 sheet")
-                ws_iyb = wb_out.Worksheets("V0-IYB业绩")
-                ws_iyb.Copy()
-                _new_wb_iyb = excel_app.ActiveWorkbook
-                _new_wb_iyb.Worksheets(1).Name = "V0"
-                _new_ws_iyb = _new_wb_iyb.Worksheets(1)
-                _used_iyb = _new_ws_iyb.UsedRange
-                _used_iyb.Copy()
-                _used_iyb.PasteSpecial(Paste=-4163)
-                excel_app.CutCopyMode = False
-                _new_ws_iyb.Activate()
-                excel_app.ActiveWindow.Zoom = 100
-                _new_wb_iyb.SaveAs(_iyb_path, FileFormat=51)
-                _new_wb_iyb.Close(False)
-                print(f"      ✅ 已另存: IYB业绩追踪周报-{_today_str}.xlsx（仅V0）")
-        except Exception as e:
-            print(f"      ⚠️ 另存 V0-IYB业绩 失败: {e}")
+        print("   📋 另存 V0-IYB业绩 为IYB业绩追踪周报...")
+        _export_iyb_report(excel_app, wb_out, str(Path(output_file_path).parent), today_str)
 
-        # 关闭 Excel
+        # ---- 关闭 Excel ----
         print()
         print(f"✅ Excel COM 操作完成，文件已保存: {output_file_path}")
         try:
@@ -2530,6 +2168,16 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
     else:
         print("   ⚠️ 无参考文件，跳过结果验证报告生成")
 
+    # ---- Part 6: 生成执行流程说明文档 ----
+    print()
+    print("=" * 60)
+    print("Part 6: 生成执行流程说明文档")
+    print("=" * 60)
+
+    manual_filename = f"业绩数据整合脚本执行流程说明-{today_str}.docx"
+    manual_path = str(Path(output_dir) / manual_filename)
+    manual_path = generate_execution_manual_document(manual_path, today_str)
+
     print()
     print("=" * 60)
     print("✅ 全部完成！")
@@ -2539,9 +2187,10 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
     print(f"   转换规则文档: {doc_path}")
     if report_path:
         print(f"   结果验证报告: {report_path}")
+    print(f"   执行流程说明文档: {manual_path}")
     print("=" * 60)
 
-    return output_file_path, doc_path, report_path
+    return output_file_path, doc_path, report_path, manual_path
 
 
 # ============================================================
@@ -2785,6 +2434,488 @@ def generate_rules_document(doc_path, date_str):
     doc.save(doc_path)
     print(f"   Word文档已保存: {doc_path}")
 
+    return doc_path
+
+
+def generate_execution_manual_document(doc_path, date_str):
+    """生成业绩数据整合脚本执行流程说明 Word 文档。"""
+
+    doc = Document()
+
+    style = doc.styles['Normal']
+    style.font.name = '宋体'
+    style.font.size = Pt(11)
+    r = style.element
+    rPr = r.find(qn('w:rPr'))
+    rFonts = rPr.find(qn('w:rFonts'))
+    rFonts.set(qn('w:eastAsia'), '宋体')
+
+    title = doc.add_heading('业绩数据整合脚本执行流程说明', level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in title.runs:
+        run.font.name = '微软雅黑'
+        run.font.size = Pt(16)
+        run.font.bold = True
+
+    doc.add_paragraph(f'生成日期: {date_str[:4]}-{date_str[4:6]}-{date_str[6:]}')
+    doc.add_paragraph('脚本文件: performance_data_integrated_generator.py')
+    doc.add_paragraph('脚本版本: v1.0')
+    doc.add_paragraph('合并来源: query_to_v01.py (v2.5) + ngp_to_v0ngp.py (v1.8)')
+    doc.add_paragraph()
+
+    doc.add_heading('目录', level=1)
+    add_toc_to_doc(doc)
+
+    # ==================== 一、脚本概述 ====================
+    doc.add_heading('一、脚本概述', level=1)
+
+    doc.add_heading('1.1 功能定位', level=2)
+    items = [
+        '一次执行即可生成包含 V0 和 V0-NGP 两个 sheet 的业绩数据-整合文件',
+        'V0 sheet: 综合查询结果数据 → 80列V0格式（与参考文件V0数据格式一致）',
+        'V0-NGP sheet: NGP数据 → 39列V0-NGP格式（与参考文件-NGP数据格式一致）',
+        '同时生成 V0-IYB业绩 sheet（含端口/分层映射）',
+        '自动生成转换规则说明 Word 文档',
+        '自动生成结果验证报告（对比参考文件）',
+    ]
+    for item in items:
+        p = doc.add_paragraph(item, style='List Number')
+        for run in p.runs:
+            run.font.name = '宋体'
+            run.font.size = Pt(11)
+
+    doc.add_heading('1.2 主入口函数', level=2)
+    doc.add_paragraph('核心入口函数：generate_integrated_file()')
+
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '参数'
+    hdr[1].text = '说明'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    params = [
+        ('query_file_path', '综合查询结果 xlsx 文件路径'),
+        ('ngp_file_path', 'NGP xlsx 文件路径'),
+        ('mapping_table_path', '业务部门字段映射表路径（可选，自动查找）'),
+        ('reference_file_path', '参考文件路径（必填，用于保留其他sheet公式结构）'),
+        ('output_dir', '输出目录（可选，默认与综合查询文件同目录）'),
+    ]
+    for param, desc in params:
+        _cmp_add_table_row(table, [param, desc])
+
+    doc.add_paragraph()
+    doc.add_paragraph('返回值：output_file_path（主输出文件路径）、doc_path（转换规则文档路径）、report_path（验证报告路径）')
+
+    # ==================== 二、执行步骤详解 ====================
+    doc.add_heading('二、执行步骤详解', level=1)
+
+    # -------------------- Part 1: V0 数据处理 --------------------
+    doc.add_heading('2.1 Part 1: V0 数据处理', level=2)
+    doc.add_paragraph('处理函数：process_v0_data(query_file_path, mapping_table_path)')
+    doc.add_paragraph('处理目标：综合查询结果 → V0 格式（80列）')
+
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '步骤'
+    hdr[1].text = '操作'
+    hdr[2].text = '执行内容'
+    hdr[3].text = '关键说明'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    v0_steps = [
+        ('Step 1', '读取综合查询数据', '读取 xlsx 文件，获取原始数据', '原始数据: N行 × M列'),
+        ('Step 2', '删除永领致远', '删除签单供应商="永领致远顾问有限公司"的行', '删除后剩余: N-D行'),
+        ('Step 2b', '保单状态回填', '保单状态优先，为空时用订单状态回填', '保单状态为空 → 使用订单状态值'),
+        ('Step 3', '繁简转换', '繁体→简体（使用 OpenCC t2s）', '自动跳过数值列'),
+        ('Step 4', '产品名称映射', '按映射表清洗产品名称', '旧产品名称 → 新产品名称'),
+        ('Step 5', '列名映射', '综合查询列名 → V0 格式（80列）', '丢弃不需要的列，缺失列填NaN'),
+        ('Step 6', '保单状态映射', '原始值 → V0 标准值', '如"已生效"→"生效"、"PENDING"→"pending"'),
+        ('Step 7', '数据清洗', '多项清洗操作', '详见下表'),
+    ]
+    for step in v0_steps:
+        _cmp_add_table_row(table, step)
+
+    doc.add_paragraph()
+    doc.add_heading('Step 7 数据清洗详细内容', level=3)
+
+    table2 = doc.add_table(rows=1, cols=3)
+    table2.style = 'Table Grid'
+    table2.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr2 = table2.rows[0].cells
+    hdr2[0].text = '清洗项'
+    hdr2[1].text = '操作内容'
+    hdr2[2].text = '示例'
+    for c in hdr2:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    clean_items = [
+        ('产品品类映射', '按映射表转换产品品类', '危疾计划→重疾、医疗计划→医疗'),
+        ('币种映射', '币种标准化转换', '美元→美金、港元→港币'),
+        ('供款方式映射', '供款方式标准化', '整付保费→整付'),
+        ('电话修复', '去掉.0后缀（float→str残留）', '12345678.0→12345678'),
+        ('保单号码格式化', '纯数字→int，非纯数字→str', '00123→123、A123→A123'),
+        ('客户分群匹配', '根据PI&NONPI文件匹配', '是→PI、其他→NONPI'),
+        ('年期清洗', '去掉"年"字，整付保费特殊处理', '10年→10、整付保费→1'),
+        ('数值列处理', '数值列中"0"→NaN', '保监征费、合计等列'),
+        ('佣金模式', 'NaN→0', '-'),
+    ]
+    for item in clean_items:
+        _cmp_add_table_row(table2, item)
+
+    # -------------------- Part 2: V0-NGP 数据处理 --------------------
+    doc.add_heading('2.2 Part 2: V0-NGP 数据处理', level=2)
+    doc.add_paragraph('处理函数：process_v0ngp_data(ngp_file_path, mapping_table_path)')
+    doc.add_paragraph('处理目标：NGP 数据 → V0-NGP 格式（39列）')
+
+    table = doc.add_table(rows=1, cols=3)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '步骤'
+    hdr[1].text = '操作'
+    hdr[2].text = '执行内容'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    ngp_steps = [
+        ('Step 1', '读取 NGP 数据', '读取 xlsx 文件 Sheet1'),
+        ('Step 2', '列顺序对齐', '确保列顺序与 V0-NGP 一致（39列），缺失补None，多余删除'),
+        ('Step 3', '繁简转换', '繁体→简体转换（文本列）'),
+        ('Step 4', '产品名称映射', '按映射表清洗产品名称'),
+        ('Step 5', '数据清洗', '日期/金额类型转换、币种/保单状态/产品品类/供款方式映射、年期清洗、保单号码格式化、电话修复'),
+    ]
+    for step in ngp_steps:
+        _cmp_add_table_row(table, step)
+
+    # -------------------- Part 2c: V0-IYB业绩 数据生成 --------------------
+    doc.add_heading('2.3 Part 2c: V0-IYB业绩 数据生成', level=2)
+    doc.add_paragraph('处理函数：process_iyb_v0_data(df_v0)')
+    doc.add_paragraph('处理目标：从 V0 数据中筛选 IYB 供应商数据，生成 V0-IYB业绩 格式（20列）')
+
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '步骤'
+    hdr[1].text = '执行内容'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    iyb_steps = [
+        ('供应商筛选', '仅保留 IYB_SUPPLIERS 白名单中的供应商（9家）'),
+        ('日期过滤', '排除 2024 年及以前的保单（未签单的活跃保单保留）'),
+        ('端口映射', '业务细分 → 端口（如"BK业务"→"三方机构"）'),
+        ('分层映射', '市场分层 → 分层（如"银行网点"→"银行"）'),
+        ('列结构', '输出 20 列，顺序与 V0-IYB业绩 模板一致'),
+    ]
+    for step in iyb_steps:
+        _cmp_add_table_row(table, step)
+
+    # -------------------- Part 3: 创建输出文件并写入数据 --------------------
+    doc.add_heading('2.4 Part 3: 创建输出文件并写入数据', level=2)
+    doc.add_paragraph('核心策略：openpyxl 复制参考文件 + Excel COM 写入数据并重算公式')
+
+    doc.add_heading('Excel COM 操作步骤', level=3)
+
+    table = doc.add_table(rows=1, cols=3)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '阶段'
+    hdr[1].text = '操作'
+    hdr[2].text = '执行内容'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    com_steps = [
+        ('1', '清理残留进程', '强制关闭 Excel 进程，避免文件锁定'),
+        ('2', '复制参考文件', 'shutil.copy2 字节级复制，保留公式 sheet XML'),
+        ('3', '写入 V0 数据', '分块写入（chunk=1000），修复非日期列误设日期格式'),
+        ('4', '写入 V0-NGP 数据', '分块写入，修复非日期列误设日期格式'),
+        ('5', '写入 V0-IYB业绩 数据', '分块写入，修复 G2/H2 XLOOKUP 公式短范围问题'),
+        ('6', '保存数据写入结果', '防止后续重算崩溃丢失数据'),
+        ('7', '修复 spill sheet 日期格式错配', '按列名判断而非索引，避免误改'),
+        ('8', '重算所有公式', 'CalculateFullRebuild() 基于新数据重算'),
+        ('9', 'V0-IYB业绩 端口/分层兜底', '验证 G/H 列，对空值直接写入映射值'),
+        ('10', '统计公式重算结果', '统计各 sheet 公式数量和错误值'),
+        ('11', '清理 spilled 范围错误值', '清除错误常量'),
+        ('12', '修复 #DIV/0! 除法公式', '包裹 IFERROR，消除零除错误'),
+        ('13', '修复 V0-合并表 E列 #N/A', 'CHOOSE/MATCH 包裹 IFERROR'),
+        ('14', '设置 sheet 缩放比例', '所有 sheet 设置为 100%'),
+        ('15', '另存 V0-SunLife', '保存为"永明业绩数据-YYYYMMDD.xlsx"（公式转静态值）'),
+        ('16', '另存 V0-IYB业绩', '保存为"IYB业绩追踪周报-YYYYMMDD.xlsx"（V0+V2+匹配表）'),
+        ('17', '关闭 Excel', '退出 COM 进程'),
+    ]
+    for step in com_steps:
+        _cmp_add_table_row(table, step)
+
+    # -------------------- Part 4: 生成转换规则 Word 文档 --------------------
+    doc.add_heading('2.5 Part 4: 生成转换规则 Word 文档', level=2)
+    doc.add_paragraph('处理函数：generate_rules_document(doc_path, date_str)')
+    doc.add_paragraph('生成内容：')
+
+    items = [
+        '目录（TOC 字段）',
+        'V0 Sheet 转换规则：数据源、数据逻辑、列名映射、值域映射、数据格式化、格式设置',
+        'V0-NGP Sheet 转换规则：同上',
+        '共享映射规则汇总：保单状态、产品品类、币种、供款方式、产品名称映射',
+    ]
+    for item in items:
+        p = doc.add_paragraph(item, style='List Bullet')
+        for run in p.runs:
+            run.font.name = '宋体'
+            run.font.size = Pt(11)
+
+    # -------------------- Part 5: 生成结果验证报告 --------------------
+    doc.add_heading('2.6 Part 5: 生成结果验证报告', level=2)
+    doc.add_paragraph('处理函数：run_comparison() + generate_comparison_report()')
+    doc.add_paragraph('对比内容：')
+
+    items = [
+        '数据量验证：各 sheet 行数、列数对比',
+        '字段一致性验证：逐列值一致率、不一致样本、映射规则验证',
+        '映射规则验证：列出所有映射规则及其执行效果',
+        '格式一致性验证：表头格式、数据行格式、列宽对比',
+    ]
+    for item in items:
+        p = doc.add_paragraph(item, style='List Bullet')
+        for run in p.runs:
+            run.font.name = '宋体'
+            run.font.size = Pt(11)
+
+    # ==================== 三、核心映射规则汇总 ====================
+    doc.add_heading('三、核心映射规则汇总', level=1)
+
+    # 保单状态映射
+    doc.add_heading('3.1 保单状态映射', level=2)
+    doc.add_paragraph(f'共{len(POLICY_STATUS_MAP)}条映射规则，分为"保单状态"和"订单状态回填"两类')
+
+    table = doc.add_table(rows=1, cols=3)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '原始值'
+    hdr[1].text = 'V0标准值'
+    hdr[2].text = '类型'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    policy_status_first_half = list(POLICY_STATUS_MAP.keys())[:14]
+    for old, new in POLICY_STATUS_MAP.items():
+        mapping_type = '保单状态' if old in policy_status_first_half else '订单状态回填'
+        _cmp_add_table_row(table, [old, new, mapping_type])
+
+    # 产品品类映射
+    doc.add_heading('3.2 产品品类映射', level=2)
+
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '细分品类'
+    hdr[1].text = '标准品类'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    for old, new in PRODUCT_CATEGORY_MAP.items():
+        _cmp_add_table_row(table, [old, new])
+
+    # 币种映射
+    doc.add_heading('3.3 币种映射', level=2)
+
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '原始值'
+    hdr[1].text = '标准值'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    for old, new in CURRENCY_MAP.items():
+        _cmp_add_table_row(table, [old, new])
+
+    # 供款方式映射
+    doc.add_heading('3.4 供款方式映射', level=2)
+
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '原始值'
+    hdr[1].text = '标准值'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    for old, new in PAYMENT_METHOD_MAP.items():
+        _cmp_add_table_row(table, [old, new])
+
+    # IYB 端口映射
+    doc.add_heading('3.5 IYB 端口映射', level=2)
+
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '业务细分'
+    hdr[1].text = '端口'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    for old, new in IYB_PORT_MAP.items():
+        _cmp_add_table_row(table, [old, new])
+
+    # IYB 分层映射
+    doc.add_heading('3.6 IYB 分层映射', level=2)
+
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '市场分层'
+    hdr[1].text = '分层'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    for old, new in IYB_SEGMENT_MAP.items():
+        _cmp_add_table_row(table, [old, new])
+
+    # ==================== 四、输出文件清单 ====================
+    doc.add_heading('四、输出文件清单', level=1)
+
+    table = doc.add_table(rows=1, cols=3)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = table.rows[0].cells
+    hdr[0].text = '文件名'
+    hdr[1].text = '说明'
+    hdr[2].text = '生成时机'
+    for c in hdr:
+        _cmp_set_cell_font(c, bold=True, font_size=10)
+
+    output_files = [
+        ('业绩数据-整合-YYYYMMDD.xlsx', '主输出文件（含 V0、V0-NGP、V0-IYB业绩 及其他公式 sheet）', 'Part 3'),
+        ('永明业绩数据-YYYYMMDD.xlsx', 'V0-SunLife sheet 单独导出（公式转静态值）', 'Part 3'),
+        ('IYB业绩追踪周报-YYYYMMDD.xlsx', 'V0-IYB业绩 单独导出（含 V0+V2+匹配表）', 'Part 3'),
+        ('业绩数据-整合-转换规则说明-YYYYMMDD.docx', '转换规则说明文档', 'Part 4'),
+        ('业绩数据-整合-结果验证报告-YYYYMMDD.docx', '结果验证报告（对比参考文件）', 'Part 5'),
+        ('业绩数据整合脚本执行流程说明-YYYYMMDD.docx', '脚本执行流程说明文档', 'Part 6'),
+    ]
+    for file_info in output_files:
+        _cmp_add_table_row(table, file_info)
+
+    # ==================== 五、关键技术点 ====================
+    doc.add_heading('五、关键技术点', level=1)
+
+    tech_points = [
+        ('公式保留策略', '通过 shutil.copy2 字节级复制参考文件，再用 Excel COM 写入数据并重算，确保公式引用结构完整保留'),
+        ('XLOOKUP 公式修复', '自动将参考模板中过小的查找范围（如 $J$1:$J$10）替换为完整列引用（J:J）'),
+        ('日期格式修复', '针对 spill sheet 中非日期列误设日期格式的问题，按列名判断并修复'),
+        ('端口/分层兜底', '即使 XLOOKUP 公式修复，仍对空值行直接写入映射值作为兜底'),
+        ('错误值处理', '清理 #N/A、#VALUE!、#DIV/0! 等错误值，修复除法公式零除问题'),
+        ('数据分块写入', 'COM 写入采用 chunk=1000 分块策略，避免内存溢出'),
+        ('进程清理', '写入前强制关闭残留 Excel 进程，避免文件锁定'),
+    ]
+
+    for i, (point, desc) in enumerate(tech_points, 1):
+        doc.add_heading(f'5.{i} {point}', level=2)
+        p = doc.add_paragraph(desc)
+        for run in p.runs:
+            run.font.name = '宋体'
+            run.font.size = Pt(11)
+
+    # ==================== 六、执行流程图 ====================
+    doc.add_heading('六、执行流程图', level=1)
+
+    flow_chart = """
+开始
+  │
+  ▼
+┌─────────────────────────────────────────────┐
+│ 1. 读取输入参数                              │
+│    - 综合查询文件                            │
+│    - NGP文件                                 │
+│    - 映射表（自动查找）                       │
+│    - 参考文件（自动查找）                     │
+└─────────────────────────────────────────────┘
+  │
+  ├──────────────────────┐
+  │                      ▼
+  │  ┌───────────────────────────────┐
+  │  │ Part 1: V0 数据处理           │
+  │  │ process_v0_data()             │
+  │  │ 7个步骤 → 80列 V0 格式        │
+  │  └───────────────────────────────┘
+  │                      │
+  │                      ▼
+  │  ┌───────────────────────────────┐
+  │  │ Part 2: V0-NGP 数据处理       │
+  │  │ process_v0ngp_data()          │
+  │  │ 5个步骤 → 39列 V0-NGP 格式    │
+  │  └───────────────────────────────┘
+  │                      │
+  │                      ▼
+  │  ┌───────────────────────────────┐
+  │  │ Part 2c: V0-IYB业绩 数据生成  │
+  │  │ process_iyb_v0_data()         │
+  │  │ 筛选IYB供应商 → 20列格式      │
+  │  └───────────────────────────────┘
+  │                      │
+  │                      ▼
+  │  ┌───────────────────────────────┐
+  │  │ Part 3: 创建输出文件           │
+  │  │ - openpyxl 复制参考文件        │
+  │  │ - Excel COM 写入数据并重算     │
+  │  │ - 修复公式和格式              │
+  │  │ - 另存永明/IYB业绩文件        │
+  │  └───────────────────────────────┘
+  │                      │
+  │                      ▼
+  │  ┌───────────────────────────────┐
+  │  │ Part 4: 生成转换规则文档       │
+  │  │ generate_rules_document()     │
+  │  │ Word文档：映射规则汇总         │
+  │  └───────────────────────────────┘
+  │                      │
+  │                      ▼
+  │  ┌───────────────────────────────┐
+  │  │ Part 5: 生成结果验证报告       │
+  │  │ run_comparison()              │
+  │  │ 对比参考文件，生成验证报告     │
+  │  └───────────────────────────────┘
+  │                      │
+  │                      ▼
+  │  ┌───────────────────────────────┐
+  │  │ Part 6: 生成执行流程说明文档   │
+  │  │ generate_execution_manual_document() │
+  │  │ Word文档：脚本执行流程说明     │
+  │  └───────────────────────────────┘
+  │                      │
+  ▼                      ▼
+完成
+  │
+  └── 输出文件：业绩数据-整合-YYYYMMDD.xlsx
+      转换规则说明.docx
+      结果验证报告.docx
+      永明业绩数据-YYYYMMDD.xlsx
+      IYB业绩追踪周报-YYYYMMDD.xlsx
+      业绩数据整合脚本执行流程说明-YYYYMMDD.docx
+"""
+
+    p = doc.add_paragraph(flow_chart)
+    for run in p.runs:
+        run.font.name = '宋体'
+        run.font.size = Pt(9)
+        run.font.color.rgb = RGBColor(64, 64, 64)
+
+    doc.save(doc_path)
+    print(f"   执行流程说明文档已保存: {doc_path}")
     return doc_path
 
 
@@ -3745,6 +3876,7 @@ def main():
         print("  - V0-NGP 格式与参考文件中的-NGP完全一致")
         print("  - 同时生成转换规则说明 Word 文档")
         print("  - 同时生成结果验证报告（参考文件 vs 输出文件）")
+        print("  - 同时生成执行流程说明文档")
         print("  - 映射表默认自动查找同目录下的业务部门字段映射表.xlsx")
         sys.exit(1)
 
@@ -3780,7 +3912,7 @@ def main():
         print(f"❌ 参考文件不存在: {reference_file_path}")
         sys.exit(1)
 
-    output_file, doc_path, report_path = generate_integrated_file(
+    output_file, doc_path, report_path, manual_path = generate_integrated_file(
         query_file_path, ngp_file_path,
         mapping_table_path=mapping_table_path,
         reference_file_path=reference_file_path,
@@ -3789,6 +3921,7 @@ def main():
     print(f"🎉 转换规则文档: {doc_path}")
     if report_path:
         print(f"🎉 结果验证报告: {report_path}")
+    print(f"🎉 执行流程说明文档: {manual_path}")
 
 
 if __name__ == '__main__':
