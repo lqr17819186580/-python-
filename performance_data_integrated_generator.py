@@ -6,7 +6,6 @@
   - 一次执行即可生成包含 V0 和 V0-NGP 两个 sheet 的业绩数据-整合文件
   - V0 sheet: 综合查询结果数据 → 80列V0格式（与参考文件V0数据格式一致）
   - V0-NGP sheet: NGP数据 → 39列V0-NGP格式（与参考文件-NGP数据格式一致）
-  - 同时生成转换规则说明 Word 文档
 
 版本：1.0
 更新日志：
@@ -206,32 +205,65 @@ PAYMENT_METHOD_MAP = {
 
 # 保单状态映射（保单状态 + 订单状态回填）
 POLICY_STATUS_MAP = {
-    # 保单状态原始值 → V0简写值
-    '已生效': '生效',
-    '已生效-未回执': '生效',
-    '已生效-待核验': '生效',
-    '保单失效': '失效',
-    '已交单至保险公司': '已签单',
+    # 保单状态原始值 → V0简写值（来自业务部门字段映射表-状态匹配）
     'PENDING': 'pending',
+    'PENDING-补充资料待审核': 'pending',
+    'PENDING-补充资料审核驳回': 'pending',
     'PENDING-待补充资料': 'pending',
-    'PENDING-资料已补充待审核': 'pending',
     'PENDING-内部处理中': 'pending',
+    'PENDING-已提交保险公司': 'pending',
+    'PENDING-资料补充驳回': 'pending',
+    'PENDING-资料待补充': 'pending',
+    'PENDING-资料已补充待审核': 'pending',
+    'PENDING-尚欠保费': '尚欠保费',
     '待核保': '待批核',
     '待生效': '待批核',
+    '已交单至保险公司': '待批核',
+    '搁置受保': '搁置受保',
+    '拒保': '拒保',
+    '排期': '排期',
+    '取消投保': '取消投保',
     '取消投保中': '取消投保',
+    '尚欠保费': '尚欠保费',
+    '生效': '生效',
+    '已生效': '生效',
+    '已生效-待核验': '生效',
+    '已生效-未回执': '生效',
+    '已生效-保费豁免': '生效',
+    '保单失效': '失效',
+    '理赔终止': '失效',
     '冷静期内退保': '退保',
+    '退保': '退保',
     '申请退保中': '退保',
-    # 订单状态回填值
-    '已撤销': '取消预约',
+    '已签单': '已签单',
+    '已转户': '已转户',
+    # 订单状态回填值（来自业务部门字段映射表-状态匹配）
+    '待分配TR': '排期',
+    '待分配转介人': '排期',
+    '待确认转介信息': '排期',
+    '业务协调专员待修改': '排期',
+    '已提交预约待审核': '排期',
     '预约成功': '排期',
-    '投保文件待复核': 'pending',
-    '签单完成': '已签单',
-    '投保文件复核驳回': '拒保',
-    '已提交预约待审核': 'pending',
-    '待交单至保险公司': '已签单',
+    '预约成功-待客户签署知情书': '排期',
+    '预约成功-客户已签署知情书': '排期',
     '预约中': '排期',
-    '待确认转介信息': 'pending',
-    '预约资料待修改': 'pending',
+    '预约中-待保司回复': '排期',
+    '预约中-待预约保司': '排期',
+    '预约资料待修改': '排期',
+    '撤销预约': '取消预约',
+    '已撤销': '取消预约',
+    '保司复核驳回': '已签单',
+    '待保司复核': '已签单',
+    '待交单至保险公司': '已签单',
+    '待提交保司复核': '已签单',
+    '签单完成': '已签单',
+    '签单完成-待更新交付详情': '已签单',
+    '签单完成-待送审': '已签单',
+    '签单现场销售中': '已签单',
+    '投保文件待复核': '已签单',
+    '投保文件待复核(B岗：需审核投保文件）': '已签单',
+    '投保文件复核驳回': '已签单',
+    '投保文件复核驳回(B岗：已驳回投保文件）': '已签单',
 }
 
 # 年期特殊值
@@ -605,20 +637,53 @@ NGP_LEFT_ALIGN_COLS = ["pending原因"]
 # 共享辅助函数
 # ============================================================
 
-def load_product_name_mapping(mapping_table_path):
-    """从映射表加载产品名称映射规则。"""
+def load_all_mappings(mapping_table_path):
+    """从映射表加载所有映射规则。"""
     if not Path(mapping_table_path).exists():
-        print(f"   ⚠️ 映射表不存在: {mapping_table_path}，跳过产品名称映射")
-        return {}
+        print(f"   ⚠️ 映射表不存在: {mapping_table_path}，使用默认映射规则")
+        return None
 
-    df_map = pd.read_excel(mapping_table_path, sheet_name='产品名称匹配')
-    name_map = {}
-    for _, row in df_map.iterrows():
-        raw_name = str(row['旧产品名称']).strip()
-        std_name = str(row['新产品名称']).strip()
-        if raw_name and std_name and raw_name != std_name:
-            name_map[raw_name] = std_name
-    return name_map
+    mappings = {
+        'status': {},
+        'category': {},
+        'product_name': {},
+    }
+
+    try:
+        df_status = pd.read_excel(mapping_table_path, sheet_name='状态匹配')
+        for _, row in df_status.iterrows():
+            source_col = str(row['来源列']).strip() if pd.notna(row['来源列']) else ''
+            system_val = str(row['系统值']).strip() if pd.notna(row['系统值']) else ''
+            status_match = str(row['状态匹配']).strip() if pd.notna(row['状态匹配']) else ''
+            if system_val and status_match and system_val != status_match:
+                mappings['status'][system_val] = status_match
+        print(f"   ✅ 状态匹配映射: {len(mappings['status'])} 条")
+    except Exception as e:
+        print(f"   ⚠️ 读取状态匹配sheet失败: {e}")
+
+    try:
+        df_category = pd.read_excel(mapping_table_path, sheet_name='类型')
+        for _, row in df_category.iterrows():
+            product_type = str(row['产品类型']).strip() if pd.notna(row['产品类型']) else ''
+            matched_type = str(row['匹配后的产品类型']).strip() if pd.notna(row['匹配后的产品类型']) else ''
+            if product_type and matched_type and product_type != matched_type:
+                mappings['category'][product_type] = matched_type
+        print(f"   ✅ 产品类型映射: {len(mappings['category'])} 条")
+    except Exception as e:
+        print(f"   ⚠️ 读取类型sheet失败: {e}")
+
+    try:
+        df_name = pd.read_excel(mapping_table_path, sheet_name='产品名称匹配')
+        for _, row in df_name.iterrows():
+            raw_name = str(row['旧产品名称']).strip() if pd.notna(row['旧产品名称']) else ''
+            std_name = str(row['新产品名称']).strip() if pd.notna(row['新产品名称']) else ''
+            if raw_name and std_name and raw_name != std_name:
+                mappings['product_name'][raw_name] = std_name
+        print(f"   ✅ 产品名称映射: {len(mappings['product_name'])} 条")
+    except Exception as e:
+        print(f"   ⚠️ 读取产品名称匹配sheet失败: {e}")
+
+    return mappings
 
 
 def traditional_to_simplified(df, skip_cols=None):
@@ -696,7 +761,7 @@ def _clean_nianqi(x):
 
 
 def format_policy_number(df, col_name='保单号码'):
-    """保单号码格式化：纯数字→int无前缀零，非纯数字→str。"""
+    """保单号码格式化：纯数字→int无前缀零，非纯数字→保留原始格式（含前缀零）。"""
     if col_name not in df.columns:
         return df
 
@@ -708,13 +773,13 @@ def format_policy_number(df, col_name='保单号码'):
         print(f"   保单号码\"0\" → 空值 ({zero_count}条)")
         pn_col[mask_pn_zero] = np.nan
 
-    # 去掉.0后缀 + 前缀零 + 纯数字判断
+    # 去掉.0后缀 + 纯数字→int无前缀零，非纯数字→保留原始格式
     dot0_fixed = 0
     numeric_count = 0
     non_numeric_count = 0
     for idx in pn_col.dropna().index:
         raw = str(pn_col[idx])
-        s = raw.lstrip('0')
+        s = raw.strip()
         if s.endswith('.0'):
             s_no_dot = s[:-2]
             if s_no_dot.isdigit():
@@ -725,11 +790,11 @@ def format_policy_number(df, col_name='保单号码'):
             pn_col[idx] = int(s)
             numeric_count += 1
         else:
-            pn_col[idx] = raw.lstrip('0')
+            pn_col[idx] = raw
             non_numeric_count += 1
 
     df[col_name] = pn_col
-    print(f"   .0后缀修复({dot0_fixed}个), 纯数字→int({numeric_count}个), 非纯数字→str({non_numeric_count}个)")
+    print(f"   .0后缀修复({dot0_fixed}个), 纯数字→int({numeric_count}个), 非纯数字→保留原始格式({non_numeric_count}个)")
     if zero_count > 0:
         print(f"   空值保单号码: {zero_count + pn_col.isna().sum() - zero_count}个")
     return df
@@ -827,6 +892,10 @@ def _clean_nianqi_and_payment(df):
     if changed > 0:
         print(f"   年期去\"年\"字: {changed}个值发生变化")
     df['年期'] = nianqi_cleaned
+
+    if zhengfu_mask.sum() > 0:
+        df.loc[zhengfu_mask, '年期'] = 1
+
     return df
 
 
@@ -859,11 +928,14 @@ def _convert_money_cols(df, money_cols):
             print(f"   '{col}' → float")
 
 
-def _apply_standard_mappings(df):
+def _apply_standard_mappings(df, mappings=None):
     """应用标准映射：币种、保单状态、产品品类、供款方式。"""
+    status_map = mappings['status'] if mappings and 'status' in mappings else POLICY_STATUS_MAP
+    category_map = mappings['category'] if mappings and 'category' in mappings else PRODUCT_CATEGORY_MAP
+    
     df = apply_value_map(df, '币种', CURRENCY_MAP, '币种')
-    df = apply_value_map(df, '保单状态', POLICY_STATUS_MAP, '保单状态')
-    df = apply_value_map(df, '产品品类', PRODUCT_CATEGORY_MAP, '产品品类')
+    df = apply_value_map(df, '保单状态', status_map, '保单状态')
+    df = apply_value_map(df, '产品品类', category_map, '产品品类')
     df = apply_value_map(df, '供款方式', PAYMENT_METHOD_MAP, '供款方式')
     return df
 
@@ -891,6 +963,11 @@ def process_v0_data(query_file_path, mapping_table_path=None):
     print(f"📂 综合查询文件: {query_file_path}")
     if mapping_table_path:
         print(f"📂 映射表: {mapping_table_path}")
+    
+    mappings = None
+    if mapping_table_path:
+        print("📖 加载映射规则...")
+        mappings = load_all_mappings(mapping_table_path)
 
     # Step 1: 读取综合查询数据
     print("📖 Step 1: 读取综合查询数据...")
@@ -946,12 +1023,11 @@ def process_v0_data(query_file_path, mapping_table_path=None):
     # Step 4: 产品名称映射
     print()
     print("🏷️ Step 4: 产品名称按映射表清洗（综合查询数据）...")
-    name_map = {}
-    if mapping_table_path:
-        name_map = load_product_name_mapping(mapping_table_path)
+    name_map = mappings['product_name'] if mappings and 'product_name' in mappings else {}
+    if name_map:
         df_query = apply_product_name_mapping(df_query, name_map)
     else:
-        print("   未提供映射表，跳过产品名称映射")
+        print("   未提供映射表或映射表中无产品名称映射，跳过产品名称映射")
 
     # Step 5: 列名映射为 V0 格式
     print()
@@ -984,14 +1060,15 @@ def process_v0_data(query_file_path, mapping_table_path=None):
     # Step 6: 保单状态映射
     print()
     print("🔄 Step 6: 保单状态映射（原始值 → V0标准值）...")
-    df_v0 = apply_value_map(df_v0, '保单状态', POLICY_STATUS_MAP, '保单状态')
+    status_map = mappings['status'] if mappings and 'status' in mappings else POLICY_STATUS_MAP
+    df_v0 = apply_value_map(df_v0, '保单状态', status_map, '保单状态')
 
     # Step 7: 数据清洗
     print()
     print("🧹 Step 7: 数据清洗...")
 
     # 应用标准映射（币种、保单状态、产品品类、供款方式）
-    df_v0 = _apply_standard_mappings(df_v0)
+    df_v0 = _apply_standard_mappings(df_v0, mappings)
 
     # 电话列修复
     df_v0 = fix_phone_dot0(df_v0)
@@ -1003,9 +1080,9 @@ def process_v0_data(query_file_path, mapping_table_path=None):
     if '佣金模式' in df_v0.columns:
         df_v0['佣金模式'] = df_v0['佣金模式'].fillna(0)
 
-    # 计划书年龄 → float
+    # 计划书年龄：保留原始格式（可能包含"岁"、"和"等字符）
     if '计划书年龄' in df_v0.columns:
-        df_v0['计划书年龄'] = pd.to_numeric(df_v0['计划书年龄'], errors='coerce')
+        print(f"   计划书年龄: 保留原始格式，共 {df_v0['计划书年龄'].notna().sum()} 个非空值")
 
     # 年期清洗和整付保费特殊处理
     df_v0 = _clean_nianqi_and_payment(df_v0)
@@ -1017,6 +1094,14 @@ def process_v0_data(query_file_path, mapping_table_path=None):
         if prepaid_count > 0:
             print(f"   是否预缴为\"是\"的行: {prepaid_count}行 → 供款方式设置为\"预缴\"")
             df_v0.loc[prepaid_mask, '供款方式'] = '预缴'
+
+    # 是否融资单为"否"的数据设置为空值
+    if '是否融资单' in df_v0.columns:
+        financing_no_mask = df_v0['是否融资单'].fillna('').astype(str).str.strip() == '否'
+        financing_no_count = financing_no_mask.sum()
+        if financing_no_count > 0:
+            df_v0.loc[financing_no_mask, '是否融资单'] = np.nan
+            print(f"   是否融资单为'否'的数据: {financing_no_count}行 → 设置为空值")
 
     # 保单号码格式化
     print()
@@ -1078,6 +1163,11 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
     print(f"📂 NGP 输入文件: {ngp_file_path}")
     if mapping_table_path:
         print(f"📂 映射表: {mapping_table_path}")
+    
+    mappings = None
+    if mapping_table_path:
+        print("📖 加载映射规则...")
+        mappings = load_all_mappings(mapping_table_path)
 
     # Step 1: 读取 NGP 数据
     print("📖 Step 1: 读取 NGP 数据...")
@@ -1129,20 +1219,21 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
 
     # Step 4: 产品名称映射
     print("🏷️ Step 4: 产品名称按映射表清洗...")
-    if "产品名称" in df.columns and mapping_table_path:
-        name_map = load_product_name_mapping(mapping_table_path)
-        if name_map:
-            df['产品名称'] = df['产品名称'].apply(
-                lambda x: name_map.get(str(x), str(x)) if pd.notna(x) and str(x) != '0' else x
-            )
-            matched = [v for v in df['产品名称'].unique() if v in name_map.values()]
-            unmatched = [v for v in df['产品名称'].unique() if v not in name_map.values() and pd.notna(v) and str(v) != '0']
-            print(f"   匹配到标准名: {len(matched)} 个")
-            for v in sorted(matched, key=str):
-                old = [k for k, val in name_map.items() if val == v]
-                print(f"     {old[0] if old else v} → {v}")
-            if unmatched:
-                print(f"   未匹配（保留原名）: {len(unmatched)} 个")
+    name_map = mappings['product_name'] if mappings and 'product_name' in mappings else {}
+    if "产品名称" in df.columns and name_map:
+        df['产品名称'] = df['产品名称'].apply(
+            lambda x: name_map.get(str(x), str(x)) if pd.notna(x) and str(x) != '0' else x
+        )
+        matched = [v for v in df['产品名称'].unique() if v in name_map.values()]
+        unmatched = [v for v in df['产品名称'].unique() if v not in name_map.values() and pd.notna(v) and str(v) != '0']
+        print(f"   匹配到标准名: {len(matched)} 个")
+        for v in sorted(matched, key=str):
+            old = [k for k, val in name_map.items() if val == v]
+            print(f"     {old[0] if old else v} → {v}")
+        if unmatched:
+            print(f"   未匹配（保留原名）: {len(unmatched)} 个")
+    else:
+        print("   未提供映射表或映射表中无产品名称映射，跳过产品名称映射")
 
     # 产品名称为"0"的数据设置为空值
     if "产品名称" in df.columns:
@@ -1158,6 +1249,14 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
     # 日期列转换
     _convert_date_cols(df, NGP_DATE_COLUMNS)
 
+    # 批核日为"1900/1/0"的数据设置为空值
+    if '批核日（年/月/日）' in df.columns:
+        batch_date_mask = df['批核日（年/月/日）'].fillna('').astype(str).str.strip().isin(['1900/1/0', '1900/01/00'])
+        batch_date_count = batch_date_mask.sum()
+        if batch_date_count > 0:
+            df.loc[batch_date_mask, '批核日（年/月/日）'] = np.nan
+            print(f"   批核日为'1900/1/0'的数据: {batch_date_count}行 → 设置为空值")
+
     # 金额列转换
     _convert_money_cols(df, NGP_MONEY_COLUMNS)
 
@@ -1170,7 +1269,7 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
         df["佣金模式"] = pd.to_numeric(df["佣金模式"], errors='coerce').fillna(0)
 
     # 应用标准映射（币种、保单状态、产品品类、供款方式）
-    df = _apply_standard_mappings(df)
+    df = _apply_standard_mappings(df, mappings)
 
     # 年期清洗和整付保费特殊处理
     df = _clean_nianqi_and_payment(df)
@@ -1185,6 +1284,17 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
 
     # 数值列"0"→NaN
     _clean_numeric_string_cols(df, NUMERIC_STRING_COLS)
+
+    # 产品名称为空时，设置相关列也为空
+    if "产品名称" in df.columns:
+        product_name_empty_mask = df['产品名称'].fillna('').astype(str).str.strip() == ''
+        product_empty_count = product_name_empty_mask.sum()
+        if product_empty_count > 0:
+            cols_to_clear = ['计划书年龄', '保费', '申请表递交状态', '备注', '业务行政']
+            for col in cols_to_clear:
+                if col in df.columns:
+                    df.loc[product_name_empty_mask, col] = np.nan
+            print(f"   产品名称为空的数据: {product_empty_count}行 → 设置相关列(计划书年龄、保费等)为空值")
 
     print(f"   V0-NGP最终数据: {df.shape[0]} 行 × {df.shape[1]} 列")
 
@@ -1844,23 +1954,15 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
     Args:
         query_file_path: 综合查询结果 xlsx 文件路径
         ngp_file_path: NGP xlsx 文件路径
-        mapping_table_path: 业务部门字段映射表路径（可选，默认自动查找）
+        mapping_table_path: 业务部门字段映射表路径（可选）
         reference_file_path: 参考文件路径（必填，用于复制其他sheet和格式参考）
         output_dir: 输出目录（可选，默认与综合查询文件同目录）
 
     Returns:
         output_file_path: 生成的文件路径
-        doc_path: 生成的Word文档路径
+        report_path: 结果验证报告路径
+        manual_path: 执行流程说明文档路径
     """
-    # 自动查找映射表
-    if mapping_table_path is None:
-        for search_dir in [Path(query_file_path).parent, Path(ngp_file_path).parent]:
-            candidate = search_dir / '业务部门字段映射表.xlsx'
-            if candidate.exists():
-                mapping_table_path = str(candidate)
-                print(f"📂 自动找到映射表: {mapping_table_path}")
-                break
-
     # 自动查找参考文件
     if reference_file_path is None:
         for search_dir in [Path(query_file_path).parent, Path(ngp_file_path).parent]:
@@ -2148,20 +2250,10 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
             pass
         print("   文件已用 openpyxl 保存（公式 sheet 缓存值可能需要在 Excel 中手动刷新）")
 
-    # ---- Part 4: 生成转换规则Word文档 ----
+    # ---- Part 4: 生成结果验证报告（参考文件 vs 输出文件）----
     print()
     print("=" * 60)
-    print("Part 4: 生成转换规则Word文档")
-    print("=" * 60)
-
-    doc_filename = f"业绩数据-整合-转换规则说明-{today_str}.docx"
-    doc_path = str(Path(output_dir) / doc_filename)
-    doc_path = generate_rules_document(doc_path, today_str)
-
-    # ---- Part 5: 生成结果验证报告（参考文件 vs 输出文件）----
-    print()
-    print("=" * 60)
-    print("Part 5: 生成结果验证报告（参考文件 vs 输出文件）")
+    print("Part 4: 生成结果验证报告（参考文件 vs 输出文件）")
     print("=" * 60)
 
     report_path = None
@@ -2174,10 +2266,10 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
     else:
         print("   ⚠️ 无参考文件，跳过结果验证报告生成")
 
-    # ---- Part 6: 生成执行流程说明文档 ----
+    # ---- Part 5: 生成执行流程说明文档 ----
     print()
     print("=" * 60)
-    print("Part 6: 生成执行流程说明文档")
+    print("Part 5: 生成执行流程说明文档")
     print("=" * 60)
 
     manual_filename = f"业绩数据整合脚本执行流程说明-{today_str}.docx"
@@ -2190,257 +2282,20 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
     print(f"   输出文件: {output_file_path}")
     print(f"   V0 Sheet: {df_v0.shape[0]} 行 × {df_v0.shape[1]} 列（综合查询数据，已删除永领致远）")
     print(f"   V0-NGP Sheet: {df_ngp.shape[0]} 行 × {df_ngp.shape[1]} 列（独立NGP数据）")
-    print(f"   转换规则文档: {doc_path}")
+
     if report_path:
         print(f"   结果验证报告: {report_path}")
     print(f"   执行流程说明文档: {manual_path}")
     print("=" * 60)
 
-    return output_file_path, doc_path, report_path, manual_path
+    return output_file_path, report_path, manual_path
 
 
 # ============================================================
 # Word 文档生成
 # ============================================================
 
-def generate_rules_document(doc_path, date_str):
-    """生成统一的转换规则说明 Word 文档。"""
 
-    doc = Document()
-
-    # 标题
-    title = doc.add_heading('业绩数据-整合 转换规则说明', level=0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    doc.add_paragraph(f'生成日期: {date_str[:4]}-{date_str[4:6]}-{date_str[6:]}')
-    doc.add_paragraph('脚本版本: performance_data_integrated_generator.py v1.0')
-    doc.add_paragraph('合并自: query_to_v01.py (v2.5) + ngp_to_v0ngp.py (v1.8)')
-    doc.add_paragraph()
-
-    # 目录
-    doc.add_heading('目录', level=1)
-    add_toc_to_doc(doc)
-
-    # ---- Section 1: V0 转换规则 ----
-    doc.add_heading('一、V0 Sheet 转换规则（综合查询结果 → V0）', level=1)
-
-    doc.add_heading('1.1 数据源', level=2)
-    doc.add_paragraph('综合查询结果 xlsx 文件（删除永领致远） → V0 Sheet (80列)')
-
-    doc.add_heading('1.2 数据逻辑', level=2)
-    items = [
-        '综合查询结果数据（删除签单供应商="永领致远顾问有限公司"的行）',
-        'V0 Sheet 仅包含综合查询数据，不合并 V0-NGP 数据',
-        'V0-NGP 数据作为独立 Sheet 保留（含永领致远数据）',
-    ]
-    for item in items:
-        doc.add_paragraph(item, style='List Bullet')
-
-    doc.add_heading('1.3 综合查询数据清洗', level=2)
-    items = [
-        '删除签单供应商="永领致远顾问有限公司"的数据行',
-        '保单状态回填：保单状态优先，为空时用订单状态回填',
-        '繁体→简体转换（所有文本列，使用OpenCC t2s）',
-        '产品名称映射（按业务部门字段映射表清洗）',
-    ]
-    for item in items:
-        doc.add_paragraph(item, style='List Bullet')
-
-    doc.add_heading('1.3 列名映射（综合查询 → V0）', level=2)
-    table = doc.add_table(rows=len(QUERY_TO_V0_MAP) + 1, cols=2)
-    table.style = 'Table Grid'
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    hdr = table.rows[0].cells
-    hdr[0].text = '综合查询列名'
-    hdr[1].text = 'V0列名'
-    for i, (old, new) in enumerate(QUERY_TO_V0_MAP.items()):
-        row = table.rows[i + 1].cells
-        row[0].text = old
-        row[1].text = new
-
-    doc.add_paragraph()
-    doc.add_paragraph('丢弃列: ' + ', '.join(QUERY_DROP_COLS))
-    doc.add_paragraph('V0共80列，未映射的列留空（NaN）')
-
-    doc.add_heading('1.4 值域映射', level=2)
-
-    # 保单状态映射
-    doc.add_heading('1.4.1 保单状态映射', level=3)
-    table = doc.add_table(rows=len(POLICY_STATUS_MAP) + 1, cols=3)
-    table.style = 'Table Grid'
-    hdr = table.rows[0].cells
-    hdr[0].text = '原始值'
-    hdr[1].text = 'V0标准值'
-    hdr[2].text = '类型'
-    for i, (old, new) in enumerate(POLICY_STATUS_MAP.items()):
-        row = table.rows[i + 1].cells
-        row[0].text = old
-        row[1].text = new
-        if i < 14:
-            row[2].text = '保单状态'
-        else:
-            row[2].text = '订单状态回填'
-
-    # 产品品类映射
-    doc.add_heading('1.4.2 产品品类映射', level=3)
-    table = doc.add_table(rows=len(PRODUCT_CATEGORY_MAP) + 1, cols=2)
-    table.style = 'Table Grid'
-    hdr = table.rows[0].cells
-    hdr[0].text = '细分品类'
-    hdr[1].text = 'V0标准品类'
-    for i, (old, new) in enumerate(PRODUCT_CATEGORY_MAP.items()):
-        row = table.rows[i + 1].cells
-        row[0].text = old
-        row[1].text = new
-
-    # 币种映射
-    doc.add_heading('1.4.3 币种映射', level=3)
-    table = doc.add_table(rows=len(CURRENCY_MAP) + 1, cols=2)
-    table.style = 'Table Grid'
-    hdr = table.rows[0].cells
-    hdr[0].text = '原始值'
-    hdr[1].text = 'V0标准值'
-    for i, (old, new) in enumerate(CURRENCY_MAP.items()):
-        row = table.rows[i + 1].cells
-        row[0].text = old
-        row[1].text = new
-
-    # 供款方式映射
-    doc.add_heading('1.4.4 供款方式映射', level=3)
-    table = doc.add_table(rows=len(PAYMENT_METHOD_MAP) + 1, cols=2)
-    table.style = 'Table Grid'
-    hdr = table.rows[0].cells
-    hdr[0].text = '原始值'
-    hdr[1].text = 'V0标准值'
-    for i, (old, new) in enumerate(PAYMENT_METHOD_MAP.items()):
-        row = table.rows[i + 1].cells
-        row[0].text = old
-        row[1].text = new
-
-    doc.add_heading('1.5 数据格式化', level=2)
-    items = [
-        '保单号码: 纯数字→int（去掉前缀零和.0后缀），非纯数字→str',
-        '年期: 去掉"年"字后缀，"整付保费"→1且供款方式改为"整付"',
-        '电话列: .0后缀去掉（float→str残留修复）',
-        '数值列中"0"→NaN（保监征费/合计/保额/续保金额/保费储备金户口）',
-        '佣金模式: NaN→0',
-        '各映射列值"0"→NaN',
-    ]
-    for item in items:
-        doc.add_paragraph(item, style='List Bullet')
-
-    doc.add_heading('1.6 V0 Sheet 格式', level=2)
-    items = [
-        '表头: 微软雅黑/11/bold, 4色分组填充(橙/绿/紫/蓝), center/center',
-        '表头边框: 逐列精细设置（top=thin全80列, bottom=thin仅11列等）',
-        '数据行: 39列styled(宋体/11/center+4边thin) + 41列plain(宋体/11/None)',
-        '保单状态列(Col8): 黄色填充FFFFFF00',
-        '合计列(Col37): 微软雅黑+右对齐+无边框',
-        '列宽: 80列各有指定宽度',
-    ]
-    for item in items:
-        doc.add_paragraph(item, style='List Bullet')
-
-    # ---- Section 2: V0-NGP 转换规则 ----
-    doc.add_heading('二、V0-NGP Sheet 转换规则（NGP → V0-NGP）', level=1)
-
-    doc.add_heading('2.1 数据源', level=2)
-    doc.add_paragraph('NGP xlsx 文件 → V0-NGP Sheet (39列)')
-
-    doc.add_heading('2.2 列结构', level=2)
-    doc.add_paragraph('V0-NGP共39列，列顺序与NGP原始数据一致:')
-    doc.add_paragraph(', '.join(V0_NGP_COLUMNS))
-
-    doc.add_heading('2.3 数据清洗', level=2)
-    items = [
-        '列顺序对齐（缺失列补None，额外列删除）',
-        '繁体→简体转换（所有文本列，使用OpenCC t2s）',
-        '产品名称映射（按业务部门字段映射表清洗）',
-        '日期列确保为datetime格式（提交日期/签单日期/批核日）',
-        '金额列确保为float格式（保费/保费港币/APE）',
-        '计划书年龄→float, 佣金模式NaN→0',
-    ]
-    for item in items:
-        doc.add_paragraph(item, style='List Bullet')
-
-    doc.add_heading('2.4 值域映射', level=2)
-    doc.add_paragraph('与V0相同的映射规则:')
-    items = [
-        '币种映射: 美元→美金, 港元→港币',
-        '保单状态映射: 同V0保单状态映射表（14条保单状态+10条订单状态回填）',
-        '产品品类映射: 同V0产品品类映射表（10条细分→标准映射）',
-        '供款方式映射: 整付保费→整付',
-    ]
-    for item in items:
-        doc.add_paragraph(item, style='List Bullet')
-
-    doc.add_heading('2.5 数据格式化', level=2)
-    items = [
-        '保单号码: 纯数字→int（去掉前缀零和.0后缀），非纯数字→str',
-        '年期: 去掉"年"字后缀，"整付保费"→1且供款方式改为"整付"',
-        '电话列: .0后缀去掉',
-        '数值列中"0"→NaN',
-        '各映射列值"0"→NaN',
-    ]
-    for item in items:
-        doc.add_paragraph(item, style='List Bullet')
-
-    doc.add_heading('2.6 V0-NGP Sheet 格式', level=2)
-    items = [
-        '表头: 微软雅黑/11/bold=True, fill=FFC55A11(橙色), center/center',
-        '表头边框: Col1-9四边thin, Col10-14左+右+上thin+下None, Col15-39四边thin',
-        '表头对齐: 保费/保费港币=right/center, 其余=center/center',
-        '数据行: 微软雅黑/11, center/center, 无边框(NO borders)',
-        '数据行对齐: 保费/保费港币/APE=right/center, pending原因=left/center',
-        '行高: 全部16.5 (表头+数据行)',
-        '保费/保费港币 number_format: #,##0.00;[Red]#,##0.00',
-        'APE number_format: #,##0.00_',
-        '首年特殊折扣/TR/佣金模式 number_format: 0.00%',
-    ]
-    for item in items:
-        doc.add_paragraph(item, style='List Bullet')
-
-    # ---- Section 3: 共享映射表 ----
-    doc.add_heading('三、共享映射规则汇总', level=1)
-
-    doc.add_heading('3.1 保单状态映射（V0 + V0-NGP 共用）', level=2)
-    table = doc.add_table(rows=len(POLICY_STATUS_MAP) + 1, cols=3)
-    table.style = 'Table Grid'
-    hdr = table.rows[0].cells
-    hdr[0].text = '原始值'
-    hdr[1].text = 'V0/V0-NGP标准值'
-    hdr[2].text = '来源'
-    for i, (old, new) in enumerate(POLICY_STATUS_MAP.items()):
-        row = table.rows[i + 1].cells
-        row[0].text = old
-        row[1].text = new
-        row[2].text = '保单状态' if i < 14 else '订单状态回填'
-
-    doc.add_heading('3.2 产品品类映射（V0 + V0-NGP 共用）', level=2)
-    table = doc.add_table(rows=len(PRODUCT_CATEGORY_MAP) + 1, cols=2)
-    table.style = 'Table Grid'
-    hdr = table.rows[0].cells
-    hdr[0].text = '细分品类'
-    hdr[1].text = '标准品类'
-    for i, (old, new) in enumerate(PRODUCT_CATEGORY_MAP.items()):
-        row = table.rows[i + 1].cells
-        row[0].text = old
-        row[1].text = new
-
-    doc.add_heading('3.3 币种映射（V0 + V0-NGP 共用）', level=2)
-    p = doc.add_paragraph('美元 → 美金, 港元 → 港币')
-
-    doc.add_heading('3.4 供款方式映射（V0 + V0-NGP 共用）', level=2)
-    p = doc.add_paragraph('整付保费 → 整付')
-
-    doc.add_heading('3.5 产品名称映射（V0 + V0-NGP 共用）', level=2)
-    doc.add_paragraph('按业务部门字段映射表.xlsx → 产品名称匹配 sheet 中的映射规则执行')
-
-    # 保存
-    doc.save(doc_path)
-    print(f"   Word文档已保存: {doc_path}")
-
-    return doc_path
 
 
 def generate_execution_manual_document(doc_path, date_str):
@@ -2481,7 +2336,6 @@ def generate_execution_manual_document(doc_path, date_str):
         'V0 sheet: 综合查询结果数据 → 80列V0格式（与参考文件V0数据格式一致）',
         'V0-NGP sheet: NGP数据 → 39列V0-NGP格式（与参考文件-NGP数据格式一致）',
         '同时生成 V0-IYB业绩 sheet（含端口/分层映射）',
-        '自动生成转换规则说明 Word 文档',
         '自动生成结果验证报告（对比参考文件）',
     ]
     for item in items:
@@ -2505,7 +2359,7 @@ def generate_execution_manual_document(doc_path, date_str):
     params = [
         ('query_file_path', '综合查询结果 xlsx 文件路径'),
         ('ngp_file_path', 'NGP xlsx 文件路径'),
-        ('mapping_table_path', '业务部门字段映射表路径（可选，自动查找）'),
+        ('mapping_table_path', '业务部门字段映射表路径（可选）'),
         ('reference_file_path', '参考文件路径（必填，用于保留其他sheet公式结构）'),
         ('output_dir', '输出目录（可选，默认与综合查询文件同目录）'),
     ]
@@ -2513,7 +2367,7 @@ def generate_execution_manual_document(doc_path, date_str):
         _cmp_add_table_row(table, [param, desc])
 
     doc.add_paragraph()
-    doc.add_paragraph('返回值：output_file_path（主输出文件路径）、doc_path（转换规则文档路径）、report_path（验证报告路径）')
+    doc.add_paragraph('返回值：output_file_path（主输出文件路径）、report_path（验证报告路径）、manual_path（执行流程说明文档路径）')
 
     # ==================== 二、执行步骤详解 ====================
     doc.add_heading('二、执行步骤详解', level=1)
@@ -2661,25 +2515,8 @@ def generate_execution_manual_document(doc_path, date_str):
     for step in com_steps:
         _cmp_add_table_row(table, step)
 
-    # -------------------- Part 4: 生成转换规则 Word 文档 --------------------
-    doc.add_heading('2.5 Part 4: 生成转换规则 Word 文档', level=2)
-    doc.add_paragraph('处理函数：generate_rules_document(doc_path, date_str)')
-    doc.add_paragraph('生成内容：')
-
-    items = [
-        '目录（TOC 字段）',
-        'V0 Sheet 转换规则：数据源、数据逻辑、列名映射、值域映射、数据格式化、格式设置',
-        'V0-NGP Sheet 转换规则：同上',
-        '共享映射规则汇总：保单状态、产品品类、币种、供款方式、产品名称映射',
-    ]
-    for item in items:
-        p = doc.add_paragraph(item, style='List Bullet')
-        for run in p.runs:
-            run.font.name = '宋体'
-            run.font.size = Pt(11)
-
-    # -------------------- Part 5: 生成结果验证报告 --------------------
-    doc.add_heading('2.6 Part 5: 生成结果验证报告', level=2)
+    # -------------------- Part 4: 生成结果验证报告 --------------------
+    doc.add_heading('2.5 Part 4: 生成结果验证报告', level=2)
     doc.add_paragraph('处理函数：run_comparison() + generate_comparison_report()')
     doc.add_paragraph('对比内容：')
 
@@ -2809,9 +2646,8 @@ def generate_execution_manual_document(doc_path, date_str):
         ('业绩数据-整合-YYYYMMDD.xlsx', '主输出文件（含 V0、V0-NGP、V0-IYB业绩 及其他公式 sheet）', 'Part 3'),
         ('永明业绩数据-YYYYMMDD.xlsx', 'V0-SunLife sheet 单独导出（公式转静态值）', 'Part 3'),
         ('IYB业绩追踪周报-YYYYMMDD.xlsx', 'V0-IYB业绩 单独导出（含 V0+V2+匹配表）', 'Part 3'),
-        ('业绩数据-整合-转换规则说明-YYYYMMDD.docx', '转换规则说明文档', 'Part 4'),
-        ('业绩数据-整合-结果验证报告-YYYYMMDD.docx', '结果验证报告（对比参考文件）', 'Part 5'),
-        ('业绩数据整合脚本执行流程说明-YYYYMMDD.docx', '脚本执行流程说明文档', 'Part 6'),
+        ('业绩数据-整合-结果验证报告-YYYYMMDD.docx', '结果验证报告（对比参考文件）', 'Part 4'),
+        ('业绩数据整合脚本执行流程说明-YYYYMMDD.docx', '脚本执行流程说明文档', 'Part 5'),
     ]
     for file_info in output_files:
         _cmp_add_table_row(table, file_info)
@@ -2847,7 +2683,7 @@ def generate_execution_manual_document(doc_path, date_str):
 │ 1. 读取输入参数                              │
 │    - 综合查询文件                            │
 │    - NGP文件                                 │
-│    - 映射表（自动查找）                       │
+│    - 映射表（可选）                          │
 │    - 参考文件（自动查找）                     │
 └─────────────────────────────────────────────┘
   │
@@ -2898,7 +2734,7 @@ def generate_execution_manual_document(doc_path, date_str):
   │                      │
   │                      ▼
   │  ┌───────────────────────────────┐
-  │  │ Part 6: 生成执行流程说明文档   │
+  │  │ Part 5: 生成执行流程说明文档   │
   │  │ generate_execution_manual_document() │
   │  │ Word文档：脚本执行流程说明     │
   │  └───────────────────────────────┘
@@ -2907,7 +2743,6 @@ def generate_execution_manual_document(doc_path, date_str):
 完成
   │
   └── 输出文件：业绩数据-整合-YYYYMMDD.xlsx
-      转换规则说明.docx
       结果验证报告.docx
       永明业绩数据-YYYYMMDD.xlsx
       IYB业绩追踪周报-YYYYMMDD.xlsx
@@ -3872,12 +3707,11 @@ def main():
         print("参数说明:")
         print("  综合查询文件  - 综合查询结果 xlsx 文件（如 综合查询结果20260710 (源数据).xlsx）")
         print("  NGP文件       - NGP xlsx 文件（如 NGP20260714.xlsx）")
-        print("  映射表(可选)   - 业务部门字段映射表.xlsx（默认自动查找同目录下文件）")
+        print("  映射表(可选)   - 业务部门字段映射表.xlsx")
         print("  参考文件(可选) - 业绩数据-整合参考文件（用于格式参考，仅读取不修改）")
         print()
         print("输出:")
         print("  业绩数据-整合-{当天日期}.xlsx  - 含 V0 和 V0-NGP 两个 sheet")
-        print("  业绩数据-整合-转换规则说明-{当天日期}.docx  - 转换规则文档")
         print("  业绩数据-整合-结果验证报告-{当天日期}.docx  - 参考文件 vs 输出文件结果验证报告")
         print()
         print("示例:")
@@ -3888,10 +3722,9 @@ def main():
         print("  - 一次执行生成 V0 + V0-NGP 两个 sheet")
         print("  - V0 格式与参考文件中的V0完全一致")
         print("  - V0-NGP 格式与参考文件中的-NGP完全一致")
-        print("  - 同时生成转换规则说明 Word 文档")
         print("  - 同时生成结果验证报告（参考文件 vs 输出文件）")
         print("  - 同时生成执行流程说明文档")
-        print("  - 映射表默认自动查找同目录下的业务部门字段映射表.xlsx")
+        print("  - 映射表为可选参数，需要时手动提供业务部门字段映射表.xlsx")
         sys.exit(1)
 
     query_file_path = _resolve_path(sys.argv[1])
@@ -3905,12 +3738,12 @@ def main():
         arg_resolved = _resolve_path(arg)
         if '映射' in arg or '业务部门' in arg:
             mapping_table_path = arg_resolved
-        elif '整合' in arg and '0710' in arg or '参考' in arg:
+        elif '整合' in arg or '参考' in arg:
             reference_file_path = arg_resolved
-        elif mapping_table_path is None:
-            mapping_table_path = arg_resolved
+        elif reference_file_path is None:
+            reference_file_path = arg_resolved
         else:
-            reference_file_path = arg_resolved
+            mapping_table_path = arg_resolved
 
     # 验证文件存在
     if not Path(query_file_path).exists():
@@ -3926,13 +3759,12 @@ def main():
         print(f"❌ 参考文件不存在: {reference_file_path}")
         sys.exit(1)
 
-    output_file, doc_path, report_path, manual_path = generate_integrated_file(
+    output_file, report_path, manual_path = generate_integrated_file(
         query_file_path, ngp_file_path,
         mapping_table_path=mapping_table_path,
         reference_file_path=reference_file_path,
     )
     print(f"\n🎉 输出文件: {output_file}")
-    print(f"🎉 转换规则文档: {doc_path}")
     if report_path:
         print(f"🎉 结果验证报告: {report_path}")
     print(f"🎉 执行流程说明文档: {manual_path}")

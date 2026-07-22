@@ -1,0 +1,65 @@
+V0-NGP
+1.根据NGP20260714.xlsx​ 按照业绩数据-整合-0710.xlsx​ 的V0-NGP sheet上的数据格式输出、覆盖掉原来的V0-NGP sheet数据；
+其中输出的V0-NGP sheet 繁体字转简体 ；按照产品名称按映射表业务部门字段映射表.xlsx​  清洗，匹配系统标准名，未匹配到的保留原名；
+并且输出一个脚本，下次直接自动生成到业绩数据-整合-0710.xlsx 的V0-NGP sheet上；
+2.输出转换相关内容成一份word文档；
+3.
+执行脚本：
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" "D:\数据中台支持\2026-07-10\刘清茹-20260710\周报-20260710\ngp_to_v0ngp.py" "D:\数据中台支持\2026-07-10\刘清茹-20260710\周报-20260710\NGP20260714.xlsx" "D:\数据中台支持\2026-07-10\0710\业绩数据-整合-0710.xlsx" "D:\数据中台支持\2026-07-10\刘清茹-20260710\周报-20260710\业绩数据-整合.xlsx"
+
+4.验证一下D:\数据中台支持\2026-07-10\刘清茹-20260710\周报-20260710 输出文件业绩数据-整合中的V0-NGP和V0-NGP-1数据、格式等是否一致
+
+
+V0
+1.复刻一份综合查询结果20260710 (源数据).xlsx  数据，然后对「签单供应商=永领致远顾问有限公司
+」的数据删除，加上业绩数据-整合.xlsx   中的V0-NGP-1数据（业绩数据-整合.xlsx   中V0-NGP-1数据放在最后），最终输出一份跟业绩数据-整合.xlsx   的V0数据格式、字段顺序等一致的sheet，命名为V0-1,放在V0-NGP-1的左边，并且输出一份执行脚本，和输出转换相关内容成一份word文档；
+
+
+2.自动化脚本怎么执行，执行步骤教我，比如我想在这个文件地址中执行脚本NGP20260714.xlsx D:\数据中台支持\2026-07-10\刘清茹-20260710
+3.执行脚本：
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" "D:\数据中台支持\2026-07-10\刘清茹-20260710\周报-20260710\query_to_v01.py" "综合查询结果20260710 (源数据).xlsx" "业绩数据-整合.xlsx"
+4.验证一下D:\数据中台支持\2026-07-10\刘清茹-20260710\周报-20260710 输出文件业绩数据-整合中的V0和V0-1数据、格式等是否一致
+5.V0-1中的保单状态优先匹配综合查询结果20260710 (源数据).xlsx​ 中保单状态，如果综合查询结果20260710 (源数据).xlsx​ 中的保单状态为空，则匹配另一列订单状态的数据作为V0-1的保单状态数据
+
+
+
+
+合并V0-NGP和V0脚本
+1.
+query_to_v01.pyngp_to_v0ngp.py        把这俩个脚本根据综合查询结果20260710 (源数据).xlsxNGP20260714.xlsx业务部门字段映射表.xlsx业绩数据-整合-0710.xlsx        合并起来一块执行新的脚本（不需要分开执行成俩次）和新的转换规则合并成word文档，便于生成新的业绩数据-整合表-当天日期的V0，V0-NGP sheet,其中新的业绩数据-整合表-当天日期的V0和业绩数据-整合-0710.xlsx        中的V0数据格式一致，新的业绩数据-整合表-当天日期的V0-NGP跟业绩数据-整合-0710.xlsx        中的-NGP sheet数据格式一致;即我的需求是把新合并成的脚本执行，只要用户提供综合查询结果20260710 (源数据).xlsxNGP20260714.xlsx业务部门字段映射表.xlsx业绩数据-整合-0710.xlsx      这四个文件，就生成新的业绩数据-整合表-当天日期的V0，V0-NGP sheet
+
+2.自动化脚本怎么执行，执行步骤教我，比如我想在这个文件地址中执行脚本NGP20260714.xlsx D:\数据中台支持\2026-07-10\刘清茹-20260710
+3.执行脚本：
+cd /d "D:\数据中台支持\2026-07-10\刘清茹-20260710\周报-20260710"
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" performance_data_integrated_generator.py "综合查询结果20260710 (源数据).xlsx" "NGP20260714.xlsx" "业务部门字段映射表.xlsx"  "业绩数据-整合-0710.xlsx"
+4，对比脚本：
+cd /d "D:\数据中台支持\2026-07-10\刘清茹-20260710\周报-20260710"
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe"  compare_and_report.py "业绩数据-整合-0710.xlsx" "业绩数据-整合-20260716.xlsx"
+
+
+生成其他sheet
+1.根据与业绩数据-整合-0710.xlsx 中的验证表、V0-IYB业绩、V0-SunLife、V0-合并表、白博文、2025、2026、未批核、匹配表、Sheet2对于V0和V0-NGP的公式引用一样，performance_data_integrated_generator.py 脚本执行出来的业绩数据-整合-20260716也要生成验证表、V0-IYB业绩、V0-SunLife、V0-合并表、白博文、2025、2026、未批核、匹配表、Sheet2 等sheet,sheet顺序跟用户提供执行的业绩数据-整合-0710.xlsx 的sheet顺序一样；
+
+最终大一统脚本执行：
+1.
+cd /d "D:\数据中台支持\2026-07-10\刘清茹-20260710\周报-20260710"
+2.
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" performance_data_integrated_generator.py "综合查询结果20260710 (源数据).xlsx" "NGP20260714.xlsx" "业务部门字段映射表.xlsx"  "业绩数据-整合-0710.xlsx"
+
+简约版本：
+"1.
+cd /d "D:\数据中台支持\业绩整合自动化脚本"
+2.
+业务部门字段映射表有改动：
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" performance_data_integrated_generator.py "综合查询结果20260717.xlsx" "NGP_20260717.xlsx"  "业务部门字段映射表.xlsx"  "业绩数据-整合-0717.xlsx"
+
+业务部门字段映射表没有改动：
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" performance_data_integrated_generator.py "综合查询结果20260717.xlsx" "NGP_20260717.xlsx"   "业绩数据-整合-0717.xlsx"
+
+
+
+
+
+
+
+
