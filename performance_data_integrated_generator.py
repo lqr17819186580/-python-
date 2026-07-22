@@ -203,6 +203,22 @@ PAYMENT_METHOD_MAP = {
     '整付保费': '整付',
 }
 
+# 产品名称映射（默认规则，来自业务部门字段映射表-产品名称匹配）
+PRODUCT_NAME_MAP = {
+    '万年青星河尊享保险计划II': '万年青·星河尊享保险计划II',
+    '富饶万家储蓄保险计划': '富饶万家储蓄保险计划',
+    '万家康卓越保': '万家康卓越保',
+    '爱伴航2': '「爱伴航」保险计划2',
+    '万年青卓金保险计划II': '万年青·卓金保险计划II',
+    '万家康尊尚保': '万家康尊尚保',
+    '万年青星河传承保险计划II': '万年青·星河传承保险计划II',
+    '永延保障计划': '永延保障计划',
+    '智选储蓄保(20 years)': '智选储蓄保（20年保障期）',
+    '盛利II储蓄保险-至尊': '盛利II储蓄保险-至尊',
+    '宏挚传承保障计划': '宏挚传承保障计划',
+    '万年青尊享储蓄计划': '万年青尊享储蓄计划',
+}
+
 # 保单状态映射（保单状态 + 订单状态回填）
 POLICY_STATUS_MAP = {
     # 保单状态原始值 → V0简写值（来自业务部门字段映射表-状态匹配）
@@ -929,14 +945,16 @@ def _convert_money_cols(df, money_cols):
 
 
 def _apply_standard_mappings(df, mappings=None):
-    """应用标准映射：币种、保单状态、产品品类、供款方式。"""
+    """应用标准映射：币种、保单状态、产品品类、供款方式、产品名称。"""
     status_map = mappings['status'] if mappings and 'status' in mappings else POLICY_STATUS_MAP
     category_map = mappings['category'] if mappings and 'category' in mappings else PRODUCT_CATEGORY_MAP
+    name_map = mappings['product_name'] if mappings and 'product_name' in mappings else PRODUCT_NAME_MAP
     
     df = apply_value_map(df, '币种', CURRENCY_MAP, '币种')
     df = apply_value_map(df, '保单状态', status_map, '保单状态')
     df = apply_value_map(df, '产品品类', category_map, '产品品类')
     df = apply_value_map(df, '供款方式', PAYMENT_METHOD_MAP, '供款方式')
+    df = apply_product_name_mapping(df, name_map)
     return df
 
 
@@ -1023,11 +1041,8 @@ def process_v0_data(query_file_path, mapping_table_path=None):
     # Step 4: 产品名称映射
     print()
     print("🏷️ Step 4: 产品名称按映射表清洗（综合查询数据）...")
-    name_map = mappings['product_name'] if mappings and 'product_name' in mappings else {}
-    if name_map:
-        df_query = apply_product_name_mapping(df_query, name_map)
-    else:
-        print("   未提供映射表或映射表中无产品名称映射，跳过产品名称映射")
+    name_map = mappings['product_name'] if mappings and 'product_name' in mappings else PRODUCT_NAME_MAP
+    df_query = apply_product_name_mapping(df_query, name_map)
 
     # Step 5: 列名映射为 V0 格式
     print()
@@ -1219,21 +1234,8 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
 
     # Step 4: 产品名称映射
     print("🏷️ Step 4: 产品名称按映射表清洗...")
-    name_map = mappings['product_name'] if mappings and 'product_name' in mappings else {}
-    if "产品名称" in df.columns and name_map:
-        df['产品名称'] = df['产品名称'].apply(
-            lambda x: name_map.get(str(x), str(x)) if pd.notna(x) and str(x) != '0' else x
-        )
-        matched = [v for v in df['产品名称'].unique() if v in name_map.values()]
-        unmatched = [v for v in df['产品名称'].unique() if v not in name_map.values() and pd.notna(v) and str(v) != '0']
-        print(f"   匹配到标准名: {len(matched)} 个")
-        for v in sorted(matched, key=str):
-            old = [k for k, val in name_map.items() if val == v]
-            print(f"     {old[0] if old else v} → {v}")
-        if unmatched:
-            print(f"   未匹配（保留原名）: {len(unmatched)} 个")
-    else:
-        print("   未提供映射表或映射表中无产品名称映射，跳过产品名称映射")
+    name_map = mappings['product_name'] if mappings and 'product_name' in mappings else PRODUCT_NAME_MAP
+    df = apply_product_name_mapping(df, name_map)
 
     # 产品名称为"0"的数据设置为空值
     if "产品名称" in df.columns:
@@ -1249,13 +1251,13 @@ def process_v0ngp_data(ngp_file_path, mapping_table_path=None):
     # 日期列转换
     _convert_date_cols(df, NGP_DATE_COLUMNS)
 
-    # 批核日为"1900/1/0"的数据设置为空值
+    # 批核日为"1900/1/0"或datetime.time(0,0)的数据设置为空值
     if '批核日（年/月/日）' in df.columns:
-        batch_date_mask = df['批核日（年/月/日）'].fillna('').astype(str).str.strip().isin(['1900/1/0', '1900/01/00'])
+        batch_date_mask = df['批核日（年/月/日）'].fillna('').astype(str).str.strip().isin(['1900/1/0', '1900/01/00', '00:00:00'])
         batch_date_count = batch_date_mask.sum()
         if batch_date_count > 0:
             df.loc[batch_date_mask, '批核日（年/月/日）'] = np.nan
-            print(f"   批核日为'1900/1/0'的数据: {batch_date_count}行 → 设置为空值")
+            print(f"   批核日为无效值的数据: {batch_date_count}行 → 设置为空值")
 
     # 金额列转换
     _convert_money_cols(df, NGP_MONEY_COLUMNS)
