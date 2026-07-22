@@ -121,11 +121,9 @@ def process_iyb_v0_data(df_v0):
     df_iyb = df_iyb[_keep].copy()
     print(f"   排除签单日期≤2024的保单: {_dropped} 行（保留 {df_iyb.shape[0]} 行）")
 
-    # 端口映射：业务细分 → 端口
-    df_iyb['端口'] = df_iyb['业务细分'].map(IYB_PORT_MAP)
-
-    # 分层映射：市场分层 → 分层
-    df_iyb['分层'] = df_iyb['市场分层'].map(IYB_SEGMENT_MAP)
+    # 端口/分层保持为空，由 Excel XLOOKUP 公式从匹配表动态计算
+    df_iyb['端口'] = np.nan
+    df_iyb['分层'] = np.nan
 
     # 按 IYB_V0_COLUMNS 顺序构建结果，逐列按名取值，空列/重复列用唯一占位名承载。
     # 这样无论 df_iyb 原始列序如何，输出都精确对齐模板 20 列（端口=col7, 分层=col8）。
@@ -339,6 +337,7 @@ QUERY_TO_V0_MAP = {
     '缴费方式': '供款方式',
     '保单币种': '币种',
     '首年保费': '保费',
+    '首年保费（含征费）': '合计',
     '保费（港币）': '保费（港币）',
     'APE（港币）': 'APE',
     '投保人姓名（中文）': '投保人  (中文)',
@@ -925,8 +924,12 @@ def _convert_date_cols(df, date_cols):
                     converted.append(pd.NaT)
                 else:
                     s = str(val).strip()
-                    if s == '1900/1/0' or s == '1900/01/00':
-                        converted.append(s)
+                    if '1900' in s:
+                        converted.append(pd.NaT)
+                    elif isinstance(val, datetime.time):
+                        converted.append(pd.NaT)
+                    elif s == '00:00:00' or s == '0':
+                        converted.append(pd.NaT)
                     else:
                         try:
                             converted.append(pd.to_datetime(s))
@@ -1091,9 +1094,19 @@ def process_v0_data(query_file_path, mapping_table_path=None):
     # 数值列"0"→NaN
     _clean_numeric_string_cols(df_v0, NUMERIC_STRING_COLS)
 
-    # 佣金模式 NaN → 0
+    # 佣金模式 字符串清洗 + NaN → 0
     if '佣金模式' in df_v0.columns:
-        df_v0['佣金模式'] = df_v0['佣金模式'].fillna(0)
+        df_v0['佣金模式'] = df_v0['佣金模式'].fillna('').astype(str)
+        df_v0['佣金模式'] = df_v0['佣金模式'].str.replace('A模式(无续保)', 'A模式')
+        df_v0['佣金模式'] = df_v0['佣金模式'].str.replace('B模式(有续保)', 'B模式')
+       
+    # 申请表递交状态：已提交 → 已递交
+    if '申请表递交状态' in df_v0.columns:
+        submit_mask = df_v0['申请表递交状态'].fillna('').astype(str).str.strip() == '已提交'
+        submit_count = submit_mask.sum()
+        if submit_count > 0:
+            df_v0.loc[submit_mask, '申请表递交状态'] = '已递交'
+            print(f"   申请表递交状态: 已提交 → 已递交 ({submit_count}行)")
 
     # 计划书年龄：保留原始格式（可能包含"岁"、"和"等字符）
     if '计划书年龄' in df_v0.columns:
@@ -1102,9 +1115,13 @@ def process_v0_data(query_file_path, mapping_table_path=None):
     # 年期清洗和整付保费特殊处理
     df_v0 = _clean_nianqi_and_payment(df_v0)
 
-    # 是否预缴为"是"时，供款方式设置为"预缴"（优先级高于整付保费）
+    # 是否预缴为"是"时，供款方式设置为"预缴"（整付保费优先级更高）
     if prepaid_values is not None and '供款方式' in df_v0.columns:
         prepaid_mask = prepaid_values == '是'
+        # 排除供款方式已经是"整付"的行（整付保费优先级更高）
+        if '供款方式' in df_v0.columns:
+            zhengfu_mask = df_v0['供款方式'].fillna('').astype(str).str.strip() == '整付'
+            prepaid_mask = prepaid_mask & (~zhengfu_mask)
         prepaid_count = prepaid_mask.sum()
         if prepaid_count > 0:
             print(f"   是否预缴为\"是\"的行: {prepaid_count}行 → 供款方式设置为\"预缴\"")
@@ -1148,6 +1165,23 @@ def process_v0_data(query_file_path, mapping_table_path=None):
             print("   ⚠️ 未找到 PI&NONPI 文件，跳过客户分群匹配")
         else:
             print("   ⚠️ V0 无 客户分群 或 订单编号 列，跳过")
+
+    # 日期列格式化：只保留日期部分，去掉时间
+    for col in ['保费到期日（年/月/日）', '生效日期（年/月/日）', '首期保费日（年/月/日）', 
+                '批核日（年/月/日）', '递交日期', '预计冷静期截止日', '查单最新更新日期',
+                '转介日期', '提交日期', '签单日期', '投保人出生日期']:
+        if col in df_v0.columns:
+            df_v0[col] = df_v0[col].apply(
+                lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) and hasattr(x, 'strftime') else x
+            )
+    
+    # 转介时间格式化：处理数字日期序列号和datetime对象
+    if '转介时间' in df_v0.columns:
+        df_v0['转介时间'] = df_v0['转介时间'].apply(
+            lambda x: pd.to_datetime(x, origin='1899-12-30').strftime('%Y/%m/%d') 
+                      if pd.notna(x) and isinstance(x, (int, float)) and x > 0 else
+                      (x.strftime('%Y/%m/%d') if pd.notna(x) and hasattr(x, 'strftime') else x)
+        )
 
     print("   V0数据清洗完成")
     print(f"   V0最终数据: {df_v0.shape[0]} 行 x {df_v0.shape[1]} 列")
@@ -2137,9 +2171,22 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
             ws_iyb = wb_out.Worksheets("V0-IYB业绩")
             _com_write_sheet(ws_iyb, df_iyb, ws_iyb.UsedRange.Columns.Count, chunk=1000)
             print("      ✅ V0-IYB业绩 数据写入完成")
-            print("   🔧 防御性修复 V0-IYB业绩 G/H 列 XLOOKUP 公式...")
-            _formula_fixed = _fix_iyb_xlookup_formulas(ws_iyb, df_iyb.shape[0])
-            print(f"      修复公式单元格: {_formula_fixed} 个")
+            
+            print("   🔧 重新设置 V0-IYB业绩 G/H 列 XLOOKUP 公式...")
+            nrows_iyb = df_iyb.shape[0]
+            
+            # 清空 G3+/H3+ 的内容，让 XLOOKUP spill 向下扩展
+            if nrows_iyb >= 2:
+                last_row = nrows_iyb + 1
+                ws_iyb.Range(ws_iyb.Cells(3, 7), ws_iyb.Cells(last_row, 7)).ClearContents()
+                ws_iyb.Range(ws_iyb.Cells(3, 8), ws_iyb.Cells(last_row, 8)).ClearContents()
+            
+            # 设置 G2 端口公式：XLOOKUP(业务细分, 匹配表!业务细分列, 匹配表!端口列)
+            ws_iyb.Cells(2, 7).Formula = '=XLOOKUP(J2,匹配表!J:J,匹配表!H:H)'
+            # 设置 H2 分层公式：XLOOKUP(业务细分, 匹配表!业务细分列, 匹配表!分层列)
+            ws_iyb.Cells(2, 8).Formula = '=XLOOKUP(J2,匹配表!J:J,匹配表!I:I)'
+            print("      ✅ V0-IYB业绩 G2/H2 XLOOKUP 公式已设置")
+            
         except Exception as e_iyb:
             print(f"      ⚠️ V0-IYB业绩 sheet 写入失败: {e_iyb}")
 
@@ -2147,18 +2194,6 @@ def generate_integrated_file(query_file_path, ngp_file_path, mapping_table_path=
         print("   🔧 修复 spill sheet 日期格式错配（按列名而非索引）...")
         _spill_fmt_fixed, _date_col_names = _fix_spill_date_formats(wb_out, df_v0)
         print(f"      共修复 {_spill_fmt_fixed} 个 spill sheet 非日期列的日期格式")
-
-        # ---- V0-IYB业绩 端口/分层空值兜底 ----
-        print("   🛡️ V0-IYB业绩 端口/分层空值兜底验证...")
-        try:
-            _ws_iyb_check = wb_out.Worksheets("V0-IYB业绩")
-            _backfilled = _verify_iyb_port_layer(_ws_iyb_check, df_iyb.shape[0], df_iyb)
-            if _backfilled > 0:
-                print(f"      兜底写入: {_backfilled} 行端口/分层值")
-            else:
-                print(f"      ✅ 无空值")
-        except Exception as _bf_err:
-            print(f"      ⚠️ 兜底验证异常: {_bf_err}")
 
         # ---- 清理 spilled 范围错误值 ----
         print("   🧹 清理 spilled 范围错误值...")

@@ -1,0 +1,19 @@
+=== V0-IYB业绩 ===
+G2: =_xlfn.XLOOKUP(I2,匹配表!$J$1:$J$10,匹配表!$H$1:$H$10)
+H2: =_xlfn.XLOOKUP(I2,匹配表!J:J,匹配表!I:I)
+I2: <openpyxl.worksheet.formula.ArrayFormula object at 0x000001576833BE00>
+J2: <openpyxl.worksheet.formula.ArrayFormula object at 0x0000015768307B00>
+
+=== V0-合并表 ===
+E3: =IF(F3="","",CHOOSE(MATCH(F3,{"天领业务","成事家办","永领致远","BK业务","同行经代","永明经代","合伙转介业务","IFA业务","ICLUB业务","永明TA","媒体与培训","管理咨询","权益业务","DT"},0),"代理人业务","代理人业务","代理人业务","经代业务","经代业务","经代业务","KA业务","KA业务","KA业务","MGA业务","MGA业务","MGA业务","MGA业务","MGA业务"))
+E4: =IF(F4="","",CHOOSE(MATCH(F4,{"天领业务","成事家办","永领致远","BK业务","同行经代","永明经代","合伙转介业务","IFA业务","ICLUB业务","永明TA","媒体与培训","管理咨询","权益业务","DT"},0),"代理人业务","代理人业务","代理人业务","经代业务","经代业务","经代业务","KA业务","KA业务","KA业务","MGA业务","MGA业务","MGA业务","MGA业务","MGA业务"))
+F3: <openpyxl.worksheet.formula.ArrayFormula object at 0x000001576B7C8FE0>
+F4: 成事家办
+
+=== 匹配表 ===
+H1: IYB
+I1: IYB
+J1: 业务细分
+H2: B端
+I2: 持牌转介人
+J2: 同行经代
