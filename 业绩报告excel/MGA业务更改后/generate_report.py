@@ -138,16 +138,22 @@ def get_week_code(date_str):
         return None
 
 def load_csv(path):
-    """读取CSV，自动处理编码/列名空格/日期格式，生成所有派生字段"""
-    for enc in ('utf-8','utf-8-sig','gbk','gb18030'):
-        try:
-            df = pd.read_csv(path, encoding=enc)
-            df.columns = [c.strip() for c in df.columns]
-            break
-        except UnicodeDecodeError:
-            continue
+    """读取CSV或Excel，自动处理编码/列名空格/日期格式，生成所有派生字段"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in ('.xlsx', '.xls'):
+        df = pd.read_excel(path)
+    elif ext == '.csv':
+        for enc in ('utf-8','utf-8-sig','gbk','gb18030'):
+            try:
+                df = pd.read_csv(path, encoding=enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            raise ValueError(f"无法读取 {path}，请检查文件编码")
     else:
-        raise ValueError(f"无法读取 {path}，请检查文件编码")
+        raise ValueError(f"不支持的文件格式：{ext}，仅支持 .csv, .xlsx, .xls")
+    df.columns = [c.strip() for c in df.columns]
 
     if 'policy_status' in df.columns:
         df = df[df['policy_status']!='保单状态'].reset_index(drop=True)
@@ -3259,25 +3265,25 @@ def export_csvs(df, months_26, weeks_26, issue_months, pending_months, output_pr
 
 def main():
     parser = argparse.ArgumentParser(description='业绩分析报表生成脚本 V1.0')
-    parser.add_argument('csv_file', help='源数据CSV文件路径，如：业绩数据0414.csv')
+    parser.add_argument('data_file', help='源数据文件路径，支持CSV和Excel，如：业绩数据0414.csv 或 业绩数据0414.xlsx')
     parser.add_argument('--weeks', default=None,
                         help='（可选）强制指定最新周次，如 W15 或 2026W15')
     parser.add_argument('--output', default=None,
-                        help='（可选）输出文件名，默认：业绩分析报表_MMDD.xlsx')
+                        help='（可选）输出文件名，默认：业绩分析报表_MMDD.xlsx（MMDD从输入文件名提取）')
     args = parser.parse_args()
 
-    if not os.path.exists(args.csv_file):
-        print(f"错误：找不到文件 {args.csv_file}")
+    if not os.path.exists(args.data_file):
+        print(f"错误：找不到文件 {args.data_file}")
         sys.exit(1)
 
     print(f"\n{'='*60}")
     print(f"  业绩分析报表生成脚本 V1.0")
-    print(f"  源数据：{args.csv_file}")
+    print(f"  源数据：{args.data_file}")
     print(f"{'='*60}")
 
     # ── 加载数据 ────────────────────────────────────────
     global df
-    df = load_csv(args.csv_file)
+    df = load_csv(args.data_file)
 
     # ── 自动检测时间范围 ──────────────────────────────
     force_week = None
@@ -3300,11 +3306,17 @@ def main():
     # ── 构建工作簿 ───────────────────────────────────
     wb = build_all_sheets(df, months_26, weeks_26, issue_months, pending_months, licenses)
 
-    # 输出文件
+    # 输出文件 - 从输入文件名提取日期（如：业绩数据0722.csv → 0722）
     if args.output:
         out_path = args.output
     else:
-        date_str = datetime.date.today().strftime('%m%d')
+        import re
+        filename = os.path.basename(args.data_file)
+        date_match = re.search(r'(\d{4})', filename)
+        if date_match:
+            date_str = date_match.group(1)
+        else:
+            date_str = datetime.date.today().strftime('%m%d')
         out_path = f"业绩分析报表_{date_str}.xlsx"
 
     wb.save(out_path)

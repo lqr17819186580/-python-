@@ -56,7 +56,20 @@ cd /d "D:\数据中台支持\业绩整合自动化脚本"
 业务部门字段映射表没有改动：
 "C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" performance_data_integrated_generator.py "综合查询结果20260717.xlsx" "NGP_20260717.xlsx"   "业绩数据-整合-0717.xlsx"
 
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" 生成汇报文档.py 
 
+永明数据对比：
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" 对比永明业绩数据.py 
+
+
+generate_report.py 执行：
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" generate_report.py
+
+run_full_pipeline.py 执行：
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" run_full_pipeline.py.py
+
+run_full_deck.py 执行：
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" run_full_deck.py
 
 
 

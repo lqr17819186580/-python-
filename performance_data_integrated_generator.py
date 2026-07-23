@@ -926,8 +926,6 @@ def _convert_date_cols(df, date_cols):
                     s = str(val).strip()
                     if '1900' in s:
                         converted.append(pd.NaT)
-                    elif isinstance(val, datetime.time):
-                        converted.append(pd.NaT)
                     elif s == '00:00:00' or s == '0':
                         converted.append(pd.NaT)
                     else:
