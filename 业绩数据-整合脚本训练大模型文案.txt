@@ -73,10 +73,12 @@ python generate_report.py 业绩数据底表-20260717.xlsx
 
 
 run_full_pipeline.py 执行：
-"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" run_full_pipeline.py.py
+cd /d "D:\数据中台支持\业绩整合自动化脚本\业绩报表PPT" 
+python run_full_pipeline.py
 
 run_full_deck.py 执行：
-"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" run_full_deck.py
+cd /d "D:\数据中台支持\业绩整合自动化脚本\业绩报表PPT" 
+python run_full_deck.py
 
 
 
