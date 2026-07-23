@@ -62,8 +62,15 @@ cd /d "D:\数据中台支持\业绩整合自动化脚本"
 "C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" 对比永明业绩数据.py 
 
 
+
+cd /d "D:\数据中台支持\业绩整合自动化脚本\业绩报告excel\MGA业务更改后" 
+
 generate_report.py 执行：
-"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" generate_report.py
+"C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" generate_report.py  "业绩数据0722.csv"
+
+cd /d "D:\数据中台支持\业绩整合自动化脚本\业绩报告excel\MGA业务更改前" 
+python generate_report.py 业绩数据底表-20260717.xlsx
+
 
 run_full_pipeline.py 执行：
 "C:\Users\中台支持部\.workbuddy\binaries\python\envs\default\Scripts\python.exe" run_full_pipeline.py.py
