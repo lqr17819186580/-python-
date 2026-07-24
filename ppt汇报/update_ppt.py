@@ -2526,9 +2526,7 @@ SLIDE1_SUBS += [
      f"已批 {SUN_ISSUED_M:.0f}M / 剩余缺口 {SUN_GAP_M:.0f}M"),
     # So-What narrative refreshes
     ("未批核（167.9M，242 件）与待签（3.9M，12 件）合计 171.8M 在管道中，占批核 APE 的 49%。未批核融资占比 16.7% 为最大风险敞口，若能快速推进至生效，可直接拉升达成率逾 15 个百分点。",
-     f"未批核（{UNBAT_APE_M:.1f}M，{UNBAT_CNT} 件）与待签（{PEND_APE_M:.1f}M，{PEND_CNT} 件）合计 {UNBAT_APE_M+PEND_APE_M:.1f}M 在管道中，占批核 APE 的 {((UNBAT_APE_M+PEND_APE_M)/ISSUED_APE_M*100):.0f}%。若能快速推进至生效，可直接拉升达成率逾 {((UNBAT_APE_M+PEND_APE_M)/FULL_TARGET_M*100) if FULL_TARGET_M > 0 else 0:.0f} 个百分点。") if ISSUED_APE_M > 0 else
-    ("未批核（167.9M，242 件）与待签（3.9M，12 件）合计 171.8M 在管道中，占批核 APE 的 49%。未批核融资占比 16.7% 为最大风险敞口，若能快速推进至生效，可直接拉升达成率逾 15 个百分点。",
-     f"未批核（{UNBAT_APE_M:.1f}M，{UNBAT_CNT} 件）与待签（{PEND_APE_M:.1f}M，{PEND_CNT} 件）合计 {UNBAT_APE_M+PEND_APE_M:.1f}M 在管道中。若能快速推进至生效，可直接拉升达成率逾 {((UNBAT_APE_M+PEND_APE_M)/FULL_TARGET_M*100) if FULL_TARGET_M > 0 else 0:.0f} 个百分点。"),
+     f"未批核（{UNBAT_APE_M:.1f}M，{UNBAT_CNT} 件）与待签（{PEND_APE_M:.1f}M，{PEND_CNT} 件）合计 {UNBAT_APE_M+PEND_APE_M:.1f}M 在管道中，占批核 APE 的 {(UNBAT_APE_M+PEND_APE_M)/ISSUED_APE_M*100:.0f}%。若能快速推进至生效，可直接拉升达成率逾 {(UNBAT_APE_M+PEND_APE_M)/FULL_TARGET_M*100:.0f} 个百分点。"),
 ]
 
 SLIDE2_SUBS += [
