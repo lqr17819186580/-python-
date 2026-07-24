@@ -251,7 +251,7 @@ def make_branch_chart(branches, cnt_map, dpi=150, figsize=(12.8, 2.75)):
     ax1.spines[:].set_visible(False)
     ax1.grid(axis="y", color=GRID_CLR, linewidth=0.5, zorder=0)
     ax1.set_xlim(-0.6, n - 0.4)
-    ax1.set_ylim(0, max(ape_vals) * 1.22)
+    ax1.set_ylim(0, max(ape_vals) * 1.22 if ape_vals else 1)
 
     ax2 = ax1.twinx()
     ax2.set_facecolor("none")

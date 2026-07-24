@@ -37,18 +37,18 @@ from openpyxl.utils import get_column_letter
 # 一、业务常量（修改目标值只需改此处）
 # ═══════════════════════════════════════════════════════════════════════
 
-SEGMENTS = ['天领业务','成事家办','BK业务','同行经代','永明经代',
+SEGMENTS = ['天领业务','成事家办','BK业务','同行经代','永明经代','MGA业务',
             '合伙转介业务','ICLUB业务','IFA业务']
 
 TARGET_ALL = {
     '天领业务':193_000_000, '成事家办':70_000_000,  'BK业务':200_000_000,
-    '同行经代':160_000_000, '永明经代':340_000_000, '合伙转介业务':73_000_000,
-    'ICLUB业务':52_000_000, 'IFA业务':25_000_000,
+    '同行经代':160_000_000, '永明经代':340_000_000, 'MGA业务':0,
+    '合伙转介业务':73_000_000, 'ICLUB业务':52_000_000, 'IFA业务':25_000_000,
 }
 TARGET_YM = {
     '天领业务':135_100_000, '成事家办':56_000_000,  'BK业务':200_000_000,
-    '同行经代':140_000_000, '永明经代':340_000_000, '合伙转介业务':51_100_000,
-    'ICLUB业务':36_400_000, 'IFA业务':17_500_000,
+    '同行经代':140_000_000, '永明经代':340_000_000, 'MGA业务':0,
+    '合伙转介业务':51_100_000, 'ICLUB业务':36_400_000, 'IFA业务':17_500_000,
 }
 
 YM_CARRIER = '香港永明金融有限公司'
@@ -138,22 +138,16 @@ def get_week_code(date_str):
         return None
 
 def load_csv(path):
-    """读取CSV或Excel，自动处理编码/列名空格/日期格式，生成所有派生字段"""
-    ext = os.path.splitext(path)[1].lower()
-    if ext in ('.xlsx', '.xls'):
-        df = pd.read_excel(path)
-    elif ext == '.csv':
-        for enc in ('utf-8','utf-8-sig','gbk','gb18030'):
-            try:
-                df = pd.read_csv(path, encoding=enc)
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            raise ValueError(f"无法读取 {path}，请检查文件编码")
+    """读取CSV，自动处理编码/列名空格/日期格式，生成所有派生字段"""
+    for enc in ('utf-8','utf-8-sig','gbk','gb18030'):
+        try:
+            df = pd.read_csv(path, encoding=enc)
+            df.columns = [c.strip() for c in df.columns]
+            break
+        except UnicodeDecodeError:
+            continue
     else:
-        raise ValueError(f"不支持的文件格式：{ext}，仅支持 .csv, .xlsx, .xls")
-    df.columns = [c.strip() for c in df.columns]
+        raise ValueError(f"无法读取 {path}，请检查文件编码")
 
     if 'policy_status' in df.columns:
         df = df[df['policy_status']!='保单状态'].reset_index(drop=True)
@@ -195,8 +189,8 @@ def load_csv(path):
     ).fillna('D')
 
     biz_map={'天领业务':'代理人业务','成事家办':'代理人业务','BK业务':'经代业务',
-             '同行经代':'经代业务','永明经代':'经代业务','合伙转介业务':'KA业务',
-             'ICLUB业务':'KA业务','IFA业务':'KA业务'}
+             '同行经代':'经代业务','永明经代':'经代业务','MGA业务':'经代业务',
+             '合伙转介业务':'KA业务','ICLUB业务':'KA业务','IFA业务':'KA业务'}
     df['biz_cat'] = df['segment'].map(biz_map).fillna(df.get('biz_type',''))
 
     def term_cat(t):
@@ -2748,11 +2742,11 @@ def build_csv_s2(df, months_26):
     m26=(df['status']=='生效')&(df['issue_year']==2026)
     mpd=df['status'].isin(['尚欠保费','已签单','pending','待批核'])
     mwt=df['status']=='排期'
-    SEGS=['天领业务','成事家办','BK业务','同行经代','永明经代','合伙转介业务','ICLUB业务','IFA业务']
+    SEGS=['天领业务','成事家办','BK业务','同行经代','永明经代','MGA业务','合伙转介业务','ICLUB业务','IFA业务']
     TALL={'天领业务':193_000_000,'成事家办':70_000_000,'BK业务':200_000_000,'同行经代':160_000_000,
-        '永明经代':340_000_000,'合伙转介业务':73_000_000,'ICLUB业务':52_000_000,'IFA业务':25_000_000}
+        '永明经代':340_000_000,'MGA业务':0,'合伙转介业务':73_000_000,'ICLUB业务':52_000_000,'IFA业务':25_000_000}
     TYM={'天领业务':135_100_000,'成事家办':56_000_000,'BK业务':200_000_000,'同行经代':140_000_000,
-        '永明经代':340_000_000,'合伙转介业务':51_100_000,'ICLUB业务':36_400_000,'IFA业务':17_500_000}
+        '永明经代':340_000_000,'MGA业务':0,'合伙转介业务':51_100_000,'ICLUB业务':36_400_000,'IFA业务':17_500_000}
     YM='香港永明金融有限公司'
     mask_c=~df['status'].isin(['失效','退保','取消投保','搁置受保','取消预约'])
     mask_d=~df['status'].isin(['排期','失效','退保','取消投保','搁置受保','取消预约'])
@@ -2977,7 +2971,7 @@ def build_csv_s3(df, weeks_26, pending_months):
     mask_d=~df['status'].isin(['排期','失效','退保','取消投保','搁置受保','取消预约'])
     mask_e=df['status']=='生效'
     mask_sub=~df['status'].isin(['失效','退保','取消投保','搁置受保','取消预约'])
-    SEGS=['天领业务','成事家办','BK业务','同行经代','永明经代','合伙转介业务','ICLUB业务','IFA业务']
+    SEGS=['天领业务','成事家办','BK业务','同行经代','永明经代','MGA业务','合伙转介业务','ICLUB业务','IFA业务']
 
     def pivot_by(mask, group_col, time_col, time_vals):
         sub = df[mask].copy()
@@ -3265,25 +3259,25 @@ def export_csvs(df, months_26, weeks_26, issue_months, pending_months, output_pr
 
 def main():
     parser = argparse.ArgumentParser(description='业绩分析报表生成脚本 V1.0')
-    parser.add_argument('data_file', help='源数据文件路径，支持CSV和Excel，如：业绩数据0414.csv 或 业绩数据0414.xlsx')
+    parser.add_argument('csv_file', help='源数据CSV文件路径，如：业绩数据0414.csv')
     parser.add_argument('--weeks', default=None,
                         help='（可选）强制指定最新周次，如 W15 或 2026W15')
     parser.add_argument('--output', default=None,
-                        help='（可选）输出文件名，默认：业绩分析报表_MMDD.xlsx（MMDD从输入文件名提取）')
+                        help='（可选）输出文件名，默认：业绩分析报表_MMDD.xlsx')
     args = parser.parse_args()
 
-    if not os.path.exists(args.data_file):
-        print(f"错误：找不到文件 {args.data_file}")
+    if not os.path.exists(args.csv_file):
+        print(f"错误：找不到文件 {args.csv_file}")
         sys.exit(1)
 
     print(f"\n{'='*60}")
     print(f"  业绩分析报表生成脚本 V1.0")
-    print(f"  源数据：{args.data_file}")
+    print(f"  源数据：{args.csv_file}")
     print(f"{'='*60}")
 
     # ── 加载数据 ────────────────────────────────────────
     global df
-    df = load_csv(args.data_file)
+    df = load_csv(args.csv_file)
 
     # ── 自动检测时间范围 ──────────────────────────────
     force_week = None
@@ -3306,21 +3300,11 @@ def main():
     # ── 构建工作簿 ───────────────────────────────────
     wb = build_all_sheets(df, months_26, weeks_26, issue_months, pending_months, licenses)
 
-    # 输出文件 - 从输入文件名提取日期（如：业绩数据0722.csv → 20260722）
+    # 输出文件
     if args.output:
         out_path = args.output
     else:
-        import re
-        filename = os.path.basename(args.data_file)
-        date_match = re.search(r'(\d{4,8})', filename)
-        if date_match:
-            date_str = date_match.group(1)
-            if len(date_str) == 4:
-                date_str = f"2026{date_str}"
-            elif len(date_str) == 6:
-                date_str = f"20{date_str}"
-        else:
-            date_str = datetime.date.today().strftime('%Y%m%d')
+        date_str = datetime.date.today().strftime('%m%d')
         out_path = f"业绩分析报表_{date_str}.xlsx"
 
     wb.save(out_path)
