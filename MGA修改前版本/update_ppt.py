@@ -125,11 +125,6 @@ def _safe(r, key, default=0):
         return default
 
 
-def _safe_div(numerator, denominator, default=0):
-    """Safe division. Returns default if denominator is zero."""
-    return numerator / denominator if denominator != 0 else default
-
-
 def safe_cell(df, lookup_col, lookup_val, value_col, default=0):
     """One-shot safe lookup: row_by(df, lookup_col, lookup_val)[value_col]."""
     r = row_by(df, lookup_col, lookup_val)
@@ -218,7 +213,6 @@ CH_ICLUB = _channel_kpis(S2["A"], "ICLUB业务")
 CH_CSJB  = _channel_kpis(S2["A"], "成事家办")
 CH_HHZJ  = _channel_kpis(S2["A"], "合伙转介业务")
 CH_IFA   = _channel_kpis(S2["A"], "IFA业务")
-CH_MGA   = _channel_kpis(S2["A"], "MGA业务")
 
 # --- S3 A-APE / A-件数: current week + Q1 totals -----------------------------
 _week_col = f"2026{CURRENT_WEEK}"
@@ -1025,7 +1019,7 @@ def _patch_L_segment_chart(slide, chart_name):
     NS_C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 
     # Read S2 A block for all 8 segments
-    _L_SEGMENTS = ["BK业务","永明经代","同行经代","天领业务","ICLUB业务","成事家办","合伙转介业务","IFA业务","MGA业务"]
+    _L_SEGMENTS = ["BK业务","永明经代","同行经代","天领业务","ICLUB业务","成事家办","合伙转介业务","IFA业务"]
     _s2a = S2["A"]
 
     issued_vals, unbat_vals, pend_vals, gap_vals = [], [], [], []
@@ -1281,43 +1275,11 @@ _fix_chart_dlbls_positions(_SL_SUNLIFE, "Chart 0")
 print("\n[Slide 3]")
 # (channel trend charts handled below via C9013-C9037)
 
-CHANNEL_ORDER = ["永明经代","天领业务","BK业务","合伙转介业务","成事家办","同行经代","ICLUB业务","MGA业务"]
+CHANNEL_ORDER = ["永明经代","天领业务","BK业务","合伙转介业务","成事家办","同行经代","ICLUB业务"]
 # Chart 0-6 don't exist; channel charts use names C9013-C9037 on Slide 4 (slides[3])
 # Skip Chart 0-6 loop — already handled by C9013-C9037 below
 
 # Slide 4 I — 业务线月度三线趋势 charts (confirmed names from xlsx embed log)
-# Clone C9037 for MGA业务 if not already present
-import copy as _copy_ic
-_iclub_chart = None
-for _sh in _SL_BUBBLE.shapes:
-    if _sh.name == "C9037" and _sh.has_chart:
-        _iclub_chart = _sh
-        break
-
-if _iclub_chart is not None:
-    _mga_chart_exists = any(sh.name == "C9041" for sh in _SL_BUBBLE.shapes)
-    if not _mga_chart_exists:
-        _new_chart_elem = _copy_ic.deepcopy(_iclub_chart._element)
-        _SL_BUBBLE.shapes._spTree.append(_new_chart_elem)
-        _mga_chart = [sh for sh in _SL_BUBBLE.shapes if sh.name == "C9037" and sh not in [_iclub_chart]][0]
-        _mga_chart.name = "C9041"
-        _mga_chart.left = 9891308
-        _mga_chart.top = 5187864
-
-        _iclub_title = None
-        for _sh_t in _SL_BUBBLE.shapes:
-            if _sh_t.name == "s9036" and _sh_t.has_text_frame:
-                _iclub_title = _sh_t
-                break
-        if _iclub_title is not None:
-            _new_title_elem = _copy_ic.deepcopy(_iclub_title._element)
-            _SL_BUBBLE.shapes._spTree.append(_new_title_elem)
-            _new_title = [sh for sh in _SL_BUBBLE.shapes if sh.name == "s9036" and sh not in [_iclub_title]][0]
-            _new_title.name = "s9040"
-            _new_title.left = 9900448
-            _new_title.top = 5037054
-            _new_title.text_frame.text = "MGA业务"
-
 _I_CHART_MAP = [
     ("C9013", "天领业务"),
     ("C9017", "成事家办"),
@@ -1326,7 +1288,6 @@ _I_CHART_MAP = [
     ("C9029", "永明经代"),
     ("C9033", "合伙转介业务"),
     ("C9037", "ICLUB业务"),
-    ("C9041", "MGA业务"),
 ]
 print("\n[Slide 4 I charts]")
 # Update I-chart section title dynamically (e.g. "Jan-Mar 2026" → "Jan-May 2026")
@@ -1457,8 +1418,6 @@ for chart_name, seg in _I_CHART_MAP:
     _extend_i_channel_chart(_chart_slide(chart_name), chart_name, seg)
 
 
-
-
 # ── Slide 4 G: 气泡图 — 按数据更新气泡位置和大小 ──────────────────────
 print("\n[Slide 4 G/H shapes]")
 import math as _math
@@ -1483,7 +1442,6 @@ _G_SEGS = [
     ("成事家办",     "Shape 75", "Text 76"),
     ("合伙转介业务", "Shape 77", "Text 78"),
     ("IFA业务",      "Shape 79", "Text 80"),
-    ("MGA业务",      "Shape 81", "Shape 82"),
 ]
 
 # G bubble chart + H waterfall: in full 11-slide deck these are on Slide 4 (slides[3]).
@@ -1530,11 +1488,11 @@ for seg, bubble_name, lbl_name in _G_SEGS:
     for sh in _slide4.shapes:
         if sh.name == lbl_name and sh.has_text_frame:
             lbl_top = cy + sz // 2 + _LBL_GAP_Y
+            # If label would overflow plot bottom, flip label above bubble
             if lbl_top + (sh.height or 164592) > _G_PLOT_BOTTOM + 50000:
                 lbl_top = cy - sz // 2 - (sh.height or 164592) - _LBL_GAP_Y
             sh.left = cx + _LBL_OFFSET_X
             sh.top  = lbl_top
-            sh.text_frame.text = seg
             break
 
 # ── Slide 4 H: Waterfall — 柱形高度/位置/标签全部重算，标签统一在柱上方 ─
@@ -1556,34 +1514,14 @@ def _bar_h(m_val):    return max(int(abs(m_val) * _EPM), 800)
 _wv_bk = CH_BK["issued_m"];    _wv_ym = CH_YMJD["issued_m"]
 _wv_th = CH_THJD["issued_m"];  _wv_tl = CH_TL["issued_m"]
 _wv_ic = CH_ICLUB["issued_m"]; _wv_cs = CH_CSJB["issued_m"]
-_wv_hh = CH_HHZJ["issued_m"];  _wv_mga = CH_MGA["issued_m"]
-_wv_ub = UNBAT_APE_M; _wv_pd = PEND_APE_M
-_wv_gap = _WF_MAX - (_wv_bk+_wv_ym+_wv_th+_wv_tl+_wv_ic+_wv_cs+_wv_hh+_wv_mga+_wv_ub+_wv_pd)
+_wv_hh = CH_HHZJ["issued_m"];  _wv_ub = UNBAT_APE_M; _wv_pd = PEND_APE_M
+_wv_gap = _WF_MAX - (_wv_bk+_wv_ym+_wv_th+_wv_tl+_wv_ic+_wv_cs+_wv_hh+_wv_ub+_wv_pd)
 
 # Bar shapes — FIXED order from PPT left-position scan:
 # Shape 102(BK), Shape 106(永明), Shape_313(同行),
-# Shape_315×5 sorted by left: 5488940(天领),5778500(ICLUB),6057900(成事),6337300(合伙),6626860(MGA)
+# Shape_315×4 sorted by left: 5488940(天领),5778500(ICLUB),6057900(成事),6337300(合伙)
 # Shape 114(未批核), Shape 118(待签), Shape 121(缺口)
 _s315 = sorted([sh for sh in _slide4.shapes if sh.name=="Shape_315"], key=lambda s:s.left)
-
-if len(_s315) == 4:
-    import copy as _copy_wf
-    _last_s315 = _s315[-1]
-    _new_s315_elem = _copy_wf.deepcopy(_last_s315._element)
-    _slide4.shapes._spTree.append(_new_s315_elem)
-    _new_s315 = [sh for sh in _slide4.shapes if sh.name=="Shape_315" and sh not in _s315][0]
-    _s315.append(_new_s315)
-    _new_s315.left = _last_s315.left + 289560
-    _new_s315.top = _last_s315.top
-
-    _text314_list = sorted([sh for sh in _slide4.shapes if sh.name=="Text_314"], key=lambda s:s.left)
-    if len(_text314_list) == 4:
-        _last_text314 = _text314_list[-1]
-        _new_text314_elem = _copy_wf.deepcopy(_last_text314._element)
-        _slide4.shapes._spTree.append(_new_text314_elem)
-        _new_text314 = [sh for sh in _slide4.shapes if sh.name=="Text_314" and sh not in _text314_list][0]
-        _new_text314.left = _last_text314.left + 289560
-        _new_text314.top = _last_text314.top
 
 # Bar table: (shape_name_or_None, s315_idx, val_m, lbl_name, lbl_left)
 _WF_BAR_TABLE = [
@@ -1594,10 +1532,9 @@ _WF_BAR_TABLE = [
     (None,         1,    _wv_ic,  "Text_314", 5805805),   # ICLUB (S315 left=5778500)
     (None,         2,    _wv_cs,  "Text_314", 6128385),   # 成事  (S315 left=6057900)
     (None,         3,    _wv_hh,  "Text_314", 6356985),   # 合伙  (S315 left=6337300)
-    (None,         4,    _wv_mga, "Text_314", 6655585),   # MGA   (S315 left=6626860)
-    ("Shape 114",  None, _wv_ub,  "Text 115", 6850380),   # 未批核
-    ("Shape 118",  None, _wv_pd,  "Text 119", 7183000),   # 待签
-    ("Shape 121",  None, _wv_gap, "Text 122", 7515613),   # 缺口
+    ("Shape 114",  None, _wv_ub,  "Text 115", 6517767),   # 未批核
+    ("Shape 118",  None, _wv_pd,  "Text 119", 6850380),   # 待签
+    ("Shape 121",  None, _wv_gap, "Text 122", 7118223),   # 缺口
 ]
 
 _LBL_H = 182880; _LBL_GAP = 40000
@@ -1636,7 +1573,7 @@ for sh_name, s315_idx, val_m, lbl_name, lbl_left in _WF_BAR_TABLE:
             for rr in sh.text_frame.paragraphs[0].runs[1:]: rr.text = ""
         break
 
-    seg_name = {None: sh_name, 0:'天领', 1:'ICLUB', 2:'成事', 3:'合伙', 4:'MGA'}.get(s315_idx, sh_name)
+    seg_name = {None: sh_name, 0:'天领', 1:'ICLUB', 2:'成事', 3:'合伙'}.get(s315_idx, sh_name)
     print(f"  [H] {str(seg_name):10s} {val_m:7.1f}M top={bar_top} h={bar_h} lbl={lbl_txt!r} {'✓' if bar_ok else '(lbl only)'}")
 
 # ── Remaining chart replacements — names confirmed from xlsx embed log ────
@@ -2296,8 +2233,10 @@ SLIDE3_SUBS = [
     # FIX 2: 批核件数使用 SUN_ISSUED_CNT_B（从S2 B合计行），不再使用硬编码"526件"
     ("504件  |  达成率30.4%",
      f"{SUN_ISSUED_CNT_B}件  |  达成率{SUN_RATE:.1f}%"),
-    # FIX 1: 目标+缺口在同一个段落中，需要一起替换
-    ("目标976M  |  缺口679M", f"目标{SUN_TARGET_M:.0f}M  |  缺口{SUN_GAP_M:.0f}M"),
+    ("目标\n976M", f"目标\n{SUN_TARGET_M:.0f}M"),
+    ("976M", f"{SUN_TARGET_M:.0f}M"),
+    # FIX 1: 缺口使用 SUN_GAP_M = SUN_TARGET_M - SUN_ISSUED_M
+    ("|  缺口679M", f"|  缺口{SUN_GAP_M:.0f}M"),
     ("30.4%", fmt_pct(SUN_RATE)),
 ]
 
@@ -2420,7 +2359,6 @@ _tl_is, _tl_un = _stack_pct(CH_TL)
 _ic_is, _ic_un = _stack_pct(CH_ICLUB)
 _cs_is, _cs_un = _stack_pct(CH_CSJB)
 _hh_is, _hh_un = _stack_pct(CH_HHZJ)
-_mg_is, _mg_un = _stack_pct(CH_MGA)
 
 # FIX 4: K 甜甜圈使用 PIPE_TOTAL_M（批核+未批核+待签，不含流失）
 SLIDE5_SUBS = [
@@ -2588,7 +2526,7 @@ SLIDE1_SUBS += [
      f"已批 {SUN_ISSUED_M:.0f}M / 剩余缺口 {SUN_GAP_M:.0f}M"),
     # So-What narrative refreshes
     ("未批核（167.9M，242 件）与待签（3.9M，12 件）合计 171.8M 在管道中，占批核 APE 的 49%。未批核融资占比 16.7% 为最大风险敞口，若能快速推进至生效，可直接拉升达成率逾 15 个百分点。",
-     f"未批核（{UNBAT_APE_M:.1f}M，{UNBAT_CNT} 件）与待签（{PEND_APE_M:.1f}M，{PEND_CNT} 件）合计 {UNBAT_APE_M+PEND_APE_M:.1f}M 在管道中，占批核 APE 的 {_safe_div(UNBAT_APE_M+PEND_APE_M, ISSUED_APE_M)*100:.0f}%。若能快速推进至生效，可直接拉升达成率逾 {_safe_div(UNBAT_APE_M+PEND_APE_M, FULL_TARGET_M)*100:.0f} 个百分点。"),
+     f"未批核（{UNBAT_APE_M:.1f}M，{UNBAT_CNT} 件）与待签（{PEND_APE_M:.1f}M，{PEND_CNT} 件）合计 {UNBAT_APE_M+PEND_APE_M:.1f}M 在管道中，占批核 APE 的 {(UNBAT_APE_M+PEND_APE_M)/ISSUED_APE_M*100:.0f}%。若能快速推进至生效，可直接拉升达成率逾 {(UNBAT_APE_M+PEND_APE_M)/FULL_TARGET_M*100:.0f} 个百分点。"),
 ]
 
 SLIDE2_SUBS += [
@@ -2623,13 +2561,13 @@ SLIDE4_SUBS += [
     # Waterfall: -2 for 成事/合伙 (both ~2M, keep same)
     # So-what refreshes
     ("BK贡献最大批核（170.9M），但仍距目标29M。全部已批核+在途（522M）仍距目标591M。如未批核（167.9M）和待签（3.9M）能快速推进，可直接减少缺口约31%，是最快的短期行动杠杆。",
-     f"BK贡献最大批核（{CH_BK['issued_m']:.1f}M），已超目标 {CH_BK['issued_m']-CH_BK['target_m']:.0f}M。全部已批核+在途（{ISSUED_APE_M+UNBAT_APE_M+PEND_APE_M:.0f}M）仍距目标 {FULL_TARGET_M-ISSUED_APE_M-UNBAT_APE_M-PEND_APE_M:.0f}M。如未批核（{UNBAT_APE_M:.1f}M）和待签（{PEND_APE_M:.1f}M）能快速推进，可直接减少缺口约 {_safe_div(UNBAT_APE_M+PEND_APE_M, FULL_GAP_M)*100:.0f}%，是最快的短期行动杠杆。"),
+     f"BK贡献最大批核（{CH_BK['issued_m']:.1f}M），已超目标 {CH_BK['issued_m']-CH_BK['target_m']:.0f}M。全部已批核+在途（{ISSUED_APE_M+UNBAT_APE_M+PEND_APE_M:.0f}M）仍距目标 {FULL_TARGET_M-ISSUED_APE_M-UNBAT_APE_M-PEND_APE_M:.0f}M。如未批核（{UNBAT_APE_M:.1f}M）和待签（{PEND_APE_M:.1f}M）能快速推进，可直接减少缺口约 {(UNBAT_APE_M+PEND_APE_M)/FULL_GAP_M*100:.0f}%，是最快的短期行动杠杆。"),
 ]
 
 SLIDE5_SUBS += [
     # FIX 4: So-What 文案中管道总值使用 K 分母（不含流失）
     ("管道总值522.2M中，批核占67.1%（350.4M）。剩余171.8M（未批167.9M+待签3.9M）若转化可直接推高达成率15%+。",
-     f"管道总值 {PIPE_TOTAL_M:.1f}M 中，批核占 {ISSUED_SHARE_K:.1f}%（{ISSUED_APE_M:.1f}M）。剩余 {UNBAT_APE_M+PEND_APE_M:.1f}M（未批 {UNBAT_APE_M:.1f}M+待签 {PEND_APE_M:.1f}M）若转化可直接推高达成率 {_safe_div(UNBAT_APE_M+PEND_APE_M, FULL_TARGET_M)*100:.0f}%+。"),
+     f"管道总值 {PIPE_TOTAL_M:.1f}M 中，批核占 {ISSUED_SHARE_K:.1f}%（{ISSUED_APE_M:.1f}M）。剩余 {UNBAT_APE_M+PEND_APE_M:.1f}M（未批 {UNBAT_APE_M:.1f}M+待签 {PEND_APE_M:.1f}M）若转化可直接推高达成率 {(UNBAT_APE_M+PEND_APE_M)/FULL_TARGET_M*100:.0f}%+。"),
     ("BK业务批核170.9M逼近目标（200M），达成率85.4%。永明经代目标最大（340M）但实际仅86.1M，是最大绝对缺口（253.9M）。合伙转介与IFA批核几乎为零，战略价值存疑。",
      f"BK业务批核 {CH_BK['issued_m']:.1f}M 已超目标（200M），达成率 {CH_BK['rate']:.1f}%。永明经代目标最大（340M）但实际仅 {CH_YMJD['issued_m']:.1f}M，是最大绝对缺口（{340 - CH_YMJD['issued_m'] - CH_YMJD['unbat_m'] - CH_YMJD['pend_m']:.0f}M）。合伙转介与IFA批核几乎为零，战略价值存疑。"),
 ]
@@ -2822,110 +2760,6 @@ apply_substitutions(_SL_FORECAST, SLIDE2_SUBS, "Slide 2")   # F批核路径管�
 apply_substitutions(_SL_SUNLIFE,  SLIDE3_SUBS, "Slide 3")   # 永明业绩汇报
 apply_substitutions(_SL_BUBBLE,   SLIDE4_SUBS, "Slide 4")   # G气泡+H瀑布
 apply_substitutions(slides[4], SLIDE5_SUBS, "Slide 5")
-
-# ── Add MGA业务 to Slide 5 J section (保单阶段构成) ─────────────────────────
-# Template doesn't have MGA placeholder, so we add it dynamically
-from pptx.util import Pt
-from pptx.enum.text import PP_ALIGN
-
-def _add_mga_to_slide5():
-    slide = slides[4]
-    _mga_ch_exists = any(sh.name == "Text_MGA" for sh in slide.shapes)
-    if _mga_ch_exists:
-        print("  [MGA] already exists on Slide 5, skip")
-        return
-    
-    mga_top = Emu(5400000)
-    name_left = Emu(299720)
-    name_width = Emu(1243584)
-    name_height = Emu(182880)
-    total_left = Emu(299720)
-    total_top_offset = Emu(182880)
-    pct1_left = Emu(1616456)
-    pct2_left = Emu(2653916)
-    stack_left = Emu(3198368)
-    stack_top_offset = Emu(64008)
-    
-    tb_name = slide.shapes.add_textbox(name_left, mga_top, name_width, name_height)
-    tf_name = tb_name.text_frame
-    tf_name.margin_left = tf_name.margin_right = tf_name.margin_top = tf_name.margin_bottom = Emu(0)
-    tf_name.word_wrap = False
-    para = tf_name.paragraphs[0]
-    para.alignment = PP_ALIGN.LEFT
-    run = para.add_run()
-    run.text = "MGA业务"
-    run.font.size = Pt(11)
-    run.font.bold = True
-    run.font.color.rgb = RGBColor(0x20, 0x20, 0x20)
-    run.font.name = 'Calibri'
-    tb_name.name = "Text_MGA"
-    
-    total_text = f"合计 {CH_MGA['total_m']:.1f}M"
-    tb_total = slide.shapes.add_textbox(total_left, mga_top + total_top_offset, name_width, name_height)
-    tf_total = tb_total.text_frame
-    tf_total.margin_left = tf_total.margin_right = tf_total.margin_top = tf_total.margin_bottom = Emu(0)
-    tf_total.word_wrap = False
-    para = tf_total.paragraphs[0]
-    para.alignment = PP_ALIGN.LEFT
-    run = para.add_run()
-    run.text = total_text
-    run.font.size = Pt(11)
-    run.font.bold = False
-    run.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
-    run.font.name = 'Calibri'
-    tb_total.name = "Text_MGA_total"
-    
-    pct_issued = _mg_is
-    pct_unbat = _mg_un
-    pct_pend = 100 - pct_issued - pct_unbat
-    
-    tb_pct1 = slide.shapes.add_textbox(pct1_left, mga_top + stack_top_offset + Emu(9144), Emu(600000), Emu(165600))
-    tf_pct1 = tb_pct1.text_frame
-    tf_pct1.margin_left = tf_pct1.margin_right = tf_pct1.margin_top = tf_pct1.margin_bottom = Emu(0)
-    tf_pct1.word_wrap = False
-    para = tf_pct1.paragraphs[0]
-    para.alignment = PP_ALIGN.CENTER
-    run = para.add_run()
-    run.text = f"{pct_issued}%"
-    run.font.size = Pt(11)
-    run.font.bold = True
-    run.font.color.rgb = RGBColor(0x1A, 0x6B, 0x3A)
-    run.font.name = 'Calibri'
-    tb_pct1.name = "Text_MGA_pct1"
-    
-    tb_pct2 = slide.shapes.add_textbox(pct2_left, mga_top + stack_top_offset + Emu(9144), Emu(600000), Emu(165600))
-    tf_pct2 = tb_pct2.text_frame
-    tf_pct2.margin_left = tf_pct2.margin_right = tf_pct2.margin_top = tf_pct2.margin_bottom = Emu(0)
-    tf_pct2.word_wrap = False
-    para = tf_pct2.paragraphs[0]
-    para.alignment = PP_ALIGN.CENTER
-    run = para.add_run()
-    run.text = f"{pct_unbat}%"
-    run.font.size = Pt(11)
-    run.font.bold = True
-    run.font.color.rgb = RGBColor(0xC8, 0x89, 0x0A)
-    run.font.name = 'Calibri'
-    tb_pct2.name = "Text_MGA_pct2"
-    
-    stack_text = _stack_label(CH_MGA)
-    tb_stack = slide.shapes.add_textbox(stack_left, mga_top + stack_top_offset, Emu(1500000), Emu(182880))
-    tf_stack = tb_stack.text_frame
-    tf_stack.margin_left = tf_stack.margin_right = tf_stack.margin_top = tf_stack.margin_bottom = Emu(0)
-    tf_stack.word_wrap = False
-    para = tf_stack.paragraphs[0]
-    para.alignment = PP_ALIGN.LEFT
-    run = para.add_run()
-    run.text = stack_text
-    run.font.size = Pt(11)
-    run.font.bold = False
-    run.font.color.rgb = RGBColor(0x20, 0x20, 0x20)
-    run.font.name = 'Calibri'
-    tb_stack.name = "Text_MGA_stack"
-    
-    print(f"  [MGA] added to Slide 5 J section: {stack_text}, {total_text}, {pct_issued}%/{pct_unbat}%")
-
-_add_mga_to_slide5()
-
 apply_substitutions(slides[5], SLIDE6_SUBS, "Slide 6")
 apply_substitutions(_s(7), SLIDE8_SUBS, "Slide 8")
 apply_substitutions(_s(8), SLIDE9_SUBS, "Slide 9")

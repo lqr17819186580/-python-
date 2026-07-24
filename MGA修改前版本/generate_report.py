@@ -38,17 +38,17 @@ from openpyxl.utils import get_column_letter
 # ═══════════════════════════════════════════════════════════════════════
 
 SEGMENTS = ['天领业务','成事家办','BK业务','同行经代','永明经代',
-            '合伙转介业务','ICLUB业务','IFA业务','MGA业务']
+            '合伙转介业务','ICLUB业务','IFA业务']
 
 TARGET_ALL = {
     '天领业务':193_000_000, '成事家办':70_000_000,  'BK业务':200_000_000,
     '同行经代':160_000_000, '永明经代':340_000_000, '合伙转介业务':73_000_000,
-    'ICLUB业务':52_000_000, 'IFA业务':25_000_000, 'MGA业务':0,
+    'ICLUB业务':52_000_000, 'IFA业务':25_000_000,
 }
 TARGET_YM = {
     '天领业务':135_100_000, '成事家办':56_000_000,  'BK业务':200_000_000,
     '同行经代':140_000_000, '永明经代':340_000_000, '合伙转介业务':51_100_000,
-    'ICLUB业务':36_400_000, 'IFA业务':17_500_000, 'MGA业务':0,
+    'ICLUB业务':36_400_000, 'IFA业务':17_500_000,
 }
 
 YM_CARRIER = '香港永明金融有限公司'
@@ -166,7 +166,7 @@ def load_csv(path):
 
     for col in ('ape','premium_hkd','is_pf','sum_assured','premium_orig'):
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+            df[col] = pd.to_numeric(df[col],errors='coerce').fillna(0)
     df['term'] = pd.to_numeric(df.get('term',pd.Series(dtype=float)),errors='coerce')
 
     for col in ('res_date','sign_date','submit_date','issue_date'):
@@ -190,7 +190,7 @@ def load_csv(path):
 
     biz_map={'天领业务':'代理人业务','成事家办':'代理人业务','BK业务':'经代业务',
              '同行经代':'经代业务','永明经代':'经代业务','合伙转介业务':'KA业务',
-             'ICLUB业务':'KA业务','IFA业务':'KA业务','MGA业务':'MGA业务'}
+             'ICLUB业务':'KA业务','IFA业务':'KA业务'}
     df['biz_cat'] = df['segment'].map(biz_map).fillna(df.get('biz_type',''))
 
     def term_cat(t):
@@ -591,7 +591,7 @@ def build_all_sheets(df, months_26, weeks_26, issue_months, pending_months, lice
         c=ws.cell(row=r,column=j+1); c.value=txt; st_hdr(c)
     r+=1
     # FIX1: use biz_cat (segment-derived) not biz_type (CSV field, may have NaN)
-    biz_types=[('代理人业务',df['biz_cat']=='代理人业务'),('经代业务',df['biz_cat']=='经代业务'),('KA业务',df['biz_cat']=='KA业务'),('MGA业务',df['biz_cat']=='MGA业务')]
+    biz_types=[('代理人业务',df['biz_cat']=='代理人业务'),('经代业务',df['biz_cat']=='经代业务'),('KA业务',df['biz_cat']=='KA业务')]
     row_sums = {'a26':0,'c26':0,'ap':0,'cp':0,'aw':0,'cw':0}
     for i,(bt,bm) in enumerate(biz_types):
         a2026=df[mask_eff2026&bm]['ape'].sum(); c2026=df[mask_eff2026&bm].shape[0]
@@ -898,7 +898,7 @@ def build_all_sheets(df, months_26, weeks_26, issue_months, pending_months, lice
     # ============================================================
     # S2: K. 同行业绩分析 + L/M/N 月度子表
     # ============================================================
-    mask_tonghang = df['segment'].isin(['永明经代','同行经代','MGA业务'])
+    mask_tonghang = df['segment'].isin(['永明经代','同行经代'])
 
     ws2.merge_cells(f'A{r}:I{r}')
     ws2[f'A{r}'] = 'K. 同行业绩分析 | Peer Channel Analysis'
@@ -2678,7 +2678,7 @@ def build_csv_s1(df, months_26, issue_months):
     # ── G. 业务类型维度 ────────────────────────────────────────
     rows=[['业务类型','2026批核APE','批核件数','未批核APE','未批核件数','待签APE','待签件数','合计APE','合计件数']]
     gs={'a26':0,'c26':0,'ap':0,'cp':0,'aw':0,'cw':0}
-    for bt in ['代理人业务','经代业务','KA业务','MGA业务']:
+    for bt in ['代理人业务','经代业务','KA业务']:
         bm=df['biz_cat']==bt
         a26=df[m26&bm]['ape'].sum(); c26=df[m26&bm].shape[0]
         ap=df[mpd&bm]['ape'].sum(); cp=df[mpd&bm].shape[0]
@@ -2742,11 +2742,11 @@ def build_csv_s2(df, months_26):
     m26=(df['status']=='生效')&(df['issue_year']==2026)
     mpd=df['status'].isin(['尚欠保费','已签单','pending','待批核'])
     mwt=df['status']=='排期'
-    SEGS=['天领业务','成事家办','BK业务','同行经代','永明经代','合伙转介业务','ICLUB业务','IFA业务','MGA业务']
+    SEGS=['天领业务','成事家办','BK业务','同行经代','永明经代','合伙转介业务','ICLUB业务','IFA业务']
     TALL={'天领业务':193_000_000,'成事家办':70_000_000,'BK业务':200_000_000,'同行经代':160_000_000,
-        '永明经代':340_000_000,'合伙转介业务':73_000_000,'ICLUB业务':52_000_000,'IFA业务':25_000_000,'MGA业务':0}
+        '永明经代':340_000_000,'合伙转介业务':73_000_000,'ICLUB业务':52_000_000,'IFA业务':25_000_000}
     TYM={'天领业务':135_100_000,'成事家办':56_000_000,'BK业务':200_000_000,'同行经代':140_000_000,
-        '永明经代':340_000_000,'合伙转介业务':51_100_000,'ICLUB业务':36_400_000,'IFA业务':17_500_000,'MGA业务':0}
+        '永明经代':340_000_000,'合伙转介业务':51_100_000,'ICLUB业务':36_400_000,'IFA业务':17_500_000}
     YM='香港永明金融有限公司'
     mask_c=~df['status'].isin(['失效','退保','取消投保','搁置受保','取消预约'])
     mask_d=~df['status'].isin(['排期','失效','退保','取消投保','搁置受保','取消预约'])
@@ -2868,7 +2868,7 @@ def build_csv_s2(df, months_26):
     # K/O KA汇总 + L-N/P-R月度 + S/T分行
     fld_m2='KEY ACCOUNT  /  '+'  /  '.join(months_26)+'  /  合计'
     for grp_name,seg_f,k_title,k_note,codes in [
-        ('同行',df['segment'].isin(['永明经代','同行经代','MGA业务']),'K. 同行业绩分析 | Peer Channel Analysis',
+        ('同行',df['segment'].isin(['永明经代','同行经代']),'K. 同行业绩分析 | Peer Channel Analysis',
          'segment IN(永明经代,同行经代)；按2026批核APE降序',
          [('L','预约','res_ym',mask_c),('M','签单','sign_ym',mask_d),('N','批核','issue_ym',mask_e)]),
         ('银行',df['segment']=='BK业务','O. 银行业绩分析 | Bank Channel Analysis',
@@ -2971,7 +2971,7 @@ def build_csv_s3(df, weeks_26, pending_months):
     mask_d=~df['status'].isin(['排期','失效','退保','取消投保','搁置受保','取消预约'])
     mask_e=df['status']=='生效'
     mask_sub=~df['status'].isin(['失效','退保','取消投保','搁置受保','取消预约'])
-    SEGS=['天领业务','成事家办','BK业务','同行经代','永明经代','合伙转介业务','ICLUB业务','IFA业务','MGA业务']
+    SEGS=['天领业务','成事家办','BK业务','同行经代','永明经代','合伙转介业务','ICLUB业务','IFA业务']
 
     def pivot_by(mask, group_col, time_col, time_vals):
         sub = df[mask].copy()

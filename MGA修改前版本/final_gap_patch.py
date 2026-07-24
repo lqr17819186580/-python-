@@ -464,7 +464,6 @@ HEAT_ORDER = [
     ('永明经代',      '永明经代'),
     ('合伙转介业务',   '合伙转介'),   # CSV has "合伙转介业务", REF displays "合伙转介"
     ('ICLUB业务',    'ICLUB业务'),
-    ('MGA业务',      'MGA业务'),
 ]
 HEAT_ROW_COLORS = {
     # Deep saturated base colors matching the 0404 template style.
@@ -476,7 +475,6 @@ HEAT_ROW_COLORS = {
     '永明经代':     (0x1A, 0x7A, 0x3F),   # 深绿
     '合伙转介业务':  (0x94, 0xA3, 0xB8),   # 灰蓝
     'ICLUB业务':   (0x8E, 0x44, 0xAD),   # 紫
-    'MGA业务':     (0x00, 0x96, 0x88),   # 青(teal)
 }
 HEAT_TITLE_BAR = (0x7E, 0x1F, 0x1F)
 
@@ -743,17 +741,17 @@ def rebuild_heat_matrix_on_slide7(slide, s3_rows):
 # ---------------------------------------------------------------------------
 
 # T table row y-positions (from template inspection)
-T_TABLE_ROW_YS = [4224655, 4480560, 4736465, 4992370, 5248910, 5504815, 5760720, 6060440, 6262000]
-T_TABLE_TOTAL_Y = 6462000
+T_TABLE_ROW_YS = [4224655, 4480560, 4736465, 4992370, 5248910, 5504815, 5760720, 6060440]
+T_TABLE_TOTAL_Y = 6360160
 # T table column x-positions: 业务线, 件数, 件均APE(万), 平均时效, P90, 中位, 最大
 T_TABLE_COL_XS = [6348095, 7130480, 7841440, 8788100, 9621920, 10537020, 11451490]
 # S3 G row order (user requested: same as CSV)
-T_TABLE_ROW_ORDER = ['天领业务', '成事家办', 'BK业务', '同行经代', '永明经代', '合伙转介业务', 'ICLUB业务', 'IFA业务', 'MGA业务']
+T_TABLE_ROW_ORDER = ['天领业务', '成事家办', 'BK业务', '同行经代', '永明经代', '合伙转介业务', 'ICLUB业务', 'IFA业务']
 # Display names
 T_TABLE_DISPLAY = {
     '天领业务': '天领业务', '成事家办': '成事家办', 'BK业务': 'BK业务',
     '同行经代': '同行经代', '永明经代': '永明经代', '合伙转介业务': '合伙转介',
-    'ICLUB业务': 'ICLUB', 'IFA业务': 'IFA业务', 'MGA业务': 'MGA业务',
+    'ICLUB业务': 'ICLUB', 'IFA业务': 'IFA业务',
 }
 
 
