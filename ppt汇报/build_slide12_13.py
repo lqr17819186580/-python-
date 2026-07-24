@@ -223,6 +223,9 @@ def make_branch_chart(branches, cnt_map, dpi=150, figsize=(12.8, 2.75)):
     ape_vals = [b["total"] / 10000 for b in branches]          # 万
     cnt_vals = [cnt_map.get(b["name"], {}).get("total", 0) for b in branches]
 
+    max_ape = max(ape_vals) if ape_vals else 1
+    max_cnt = max(cnt_vals) if cnt_vals else 1
+
     n = len(names)
     x = np.arange(n)
 
@@ -236,7 +239,7 @@ def make_branch_chart(branches, cnt_map, dpi=150, figsize=(12.8, 2.75)):
         if val > 0:
             ax1.text(
                 bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + max(ape_vals) * 0.015,
+                bar.get_height() + max_ape * 0.015,
                 f"{int(round(val))}",
                 ha="center", va="bottom", color=TEXT_W,
                 fontsize=7, fontweight="bold"
@@ -251,7 +254,7 @@ def make_branch_chart(branches, cnt_map, dpi=150, figsize=(12.8, 2.75)):
     ax1.spines[:].set_visible(False)
     ax1.grid(axis="y", color=GRID_CLR, linewidth=0.5, zorder=0)
     ax1.set_xlim(-0.6, n - 0.4)
-    ax1.set_ylim(0, max(ape_vals) * 1.22)
+    ax1.set_ylim(0, max_ape * 1.22)
 
     ax2 = ax1.twinx()
     ax2.set_facecolor("none")
@@ -259,12 +262,12 @@ def make_branch_chart(branches, cnt_map, dpi=150, figsize=(12.8, 2.75)):
              linewidth=1.5, zorder=3, linestyle="--")
     for xi, cv in zip(x, cnt_vals):
         if cv > 0:
-            ax2.text(xi, cv + max(cnt_vals) * 0.06, str(cv),
+            ax2.text(xi, cv + max_cnt * 0.06, str(cv),
                      ha="center", va="bottom", color=LINE_CLR, fontsize=6)
     ax2.set_ylabel("件数", color=LINE_CLR, fontsize=7)
     ax2.tick_params(axis="y", labelcolor=LINE_CLR, labelsize=6)
     ax2.spines[:].set_visible(False)
-    ax2.set_ylim(0, max(cnt_vals) * 1.35 if cnt_vals else 1)
+    ax2.set_ylim(0, max_cnt * 1.35)
 
     # 图例
     from matplotlib.lines import Line2D

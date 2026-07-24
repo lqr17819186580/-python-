@@ -125,6 +125,11 @@ def _safe(r, key, default=0):
         return default
 
 
+def _safe_div(numerator, denominator, default=0):
+    """Safe division. Returns default if denominator is zero."""
+    return numerator / denominator if denominator != 0 else default
+
+
 def safe_cell(df, lookup_col, lookup_val, value_col, default=0):
     """One-shot safe lookup: row_by(df, lookup_col, lookup_val)[value_col]."""
     r = row_by(df, lookup_col, lookup_val)
@@ -2526,7 +2531,7 @@ SLIDE1_SUBS += [
      f"已批 {SUN_ISSUED_M:.0f}M / 剩余缺口 {SUN_GAP_M:.0f}M"),
     # So-What narrative refreshes
     ("未批核（167.9M，242 件）与待签（3.9M，12 件）合计 171.8M 在管道中，占批核 APE 的 49%。未批核融资占比 16.7% 为最大风险敞口，若能快速推进至生效，可直接拉升达成率逾 15 个百分点。",
-     f"未批核（{UNBAT_APE_M:.1f}M，{UNBAT_CNT} 件）与待签（{PEND_APE_M:.1f}M，{PEND_CNT} 件）合计 {UNBAT_APE_M+PEND_APE_M:.1f}M 在管道中，占批核 APE 的 {(UNBAT_APE_M+PEND_APE_M)/ISSUED_APE_M*100:.0f}%。若能快速推进至生效，可直接拉升达成率逾 {(UNBAT_APE_M+PEND_APE_M)/FULL_TARGET_M*100:.0f} 个百分点。"),
+     f"未批核（{UNBAT_APE_M:.1f}M，{UNBAT_CNT} 件）与待签（{PEND_APE_M:.1f}M，{PEND_CNT} 件）合计 {UNBAT_APE_M+PEND_APE_M:.1f}M 在管道中，占批核 APE 的 {_safe_div(UNBAT_APE_M+PEND_APE_M, ISSUED_APE_M)*100:.0f}%。若能快速推进至生效，可直接拉升达成率逾 {_safe_div(UNBAT_APE_M+PEND_APE_M, FULL_TARGET_M)*100:.0f} 个百分点。"),
 ]
 
 SLIDE2_SUBS += [
@@ -2561,13 +2566,13 @@ SLIDE4_SUBS += [
     # Waterfall: -2 for 成事/合伙 (both ~2M, keep same)
     # So-what refreshes
     ("BK贡献最大批核（170.9M），但仍距目标29M。全部已批核+在途（522M）仍距目标591M。如未批核（167.9M）和待签（3.9M）能快速推进，可直接减少缺口约31%，是最快的短期行动杠杆。",
-     f"BK贡献最大批核（{CH_BK['issued_m']:.1f}M），已超目标 {CH_BK['issued_m']-CH_BK['target_m']:.0f}M。全部已批核+在途（{ISSUED_APE_M+UNBAT_APE_M+PEND_APE_M:.0f}M）仍距目标 {FULL_TARGET_M-ISSUED_APE_M-UNBAT_APE_M-PEND_APE_M:.0f}M。如未批核（{UNBAT_APE_M:.1f}M）和待签（{PEND_APE_M:.1f}M）能快速推进，可直接减少缺口约 {(UNBAT_APE_M+PEND_APE_M)/FULL_GAP_M*100:.0f}%，是最快的短期行动杠杆。"),
+     f"BK贡献最大批核（{CH_BK['issued_m']:.1f}M），已超目标 {CH_BK['issued_m']-CH_BK['target_m']:.0f}M。全部已批核+在途（{ISSUED_APE_M+UNBAT_APE_M+PEND_APE_M:.0f}M）仍距目标 {FULL_TARGET_M-ISSUED_APE_M-UNBAT_APE_M-PEND_APE_M:.0f}M。如未批核（{UNBAT_APE_M:.1f}M）和待签（{PEND_APE_M:.1f}M）能快速推进，可直接减少缺口约 {_safe_div(UNBAT_APE_M+PEND_APE_M, FULL_GAP_M)*100:.0f}%，是最快的短期行动杠杆。"),
 ]
 
 SLIDE5_SUBS += [
     # FIX 4: So-What 文案中管道总值使用 K 分母（不含流失）
     ("管道总值522.2M中，批核占67.1%（350.4M）。剩余171.8M（未批167.9M+待签3.9M）若转化可直接推高达成率15%+。",
-     f"管道总值 {PIPE_TOTAL_M:.1f}M 中，批核占 {ISSUED_SHARE_K:.1f}%（{ISSUED_APE_M:.1f}M）。剩余 {UNBAT_APE_M+PEND_APE_M:.1f}M（未批 {UNBAT_APE_M:.1f}M+待签 {PEND_APE_M:.1f}M）若转化可直接推高达成率 {(UNBAT_APE_M+PEND_APE_M)/FULL_TARGET_M*100:.0f}%+。"),
+     f"管道总值 {PIPE_TOTAL_M:.1f}M 中，批核占 {ISSUED_SHARE_K:.1f}%（{ISSUED_APE_M:.1f}M）。剩余 {UNBAT_APE_M+PEND_APE_M:.1f}M（未批 {UNBAT_APE_M:.1f}M+待签 {PEND_APE_M:.1f}M）若转化可直接推高达成率 {_safe_div(UNBAT_APE_M+PEND_APE_M, FULL_TARGET_M)*100:.0f}%+。"),
     ("BK业务批核170.9M逼近目标（200M），达成率85.4%。永明经代目标最大（340M）但实际仅86.1M，是最大绝对缺口（253.9M）。合伙转介与IFA批核几乎为零，战略价值存疑。",
      f"BK业务批核 {CH_BK['issued_m']:.1f}M 已超目标（200M），达成率 {CH_BK['rate']:.1f}%。永明经代目标最大（340M）但实际仅 {CH_YMJD['issued_m']:.1f}M，是最大绝对缺口（{340 - CH_YMJD['issued_m'] - CH_YMJD['unbat_m'] - CH_YMJD['pend_m']:.0f}M）。合伙转介与IFA批核几乎为零，战略价值存疑。"),
 ]
