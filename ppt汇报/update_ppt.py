@@ -218,6 +218,7 @@ CH_ICLUB = _channel_kpis(S2["A"], "ICLUB业务")
 CH_CSJB  = _channel_kpis(S2["A"], "成事家办")
 CH_HHZJ  = _channel_kpis(S2["A"], "合伙转介业务")
 CH_IFA   = _channel_kpis(S2["A"], "IFA业务")
+CH_MGA   = _channel_kpis(S2["A"], "MGA业务")
 
 # --- S3 A-APE / A-件数: current week + Q1 totals -----------------------------
 _week_col = f"2026{CURRENT_WEEK}"
@@ -1024,7 +1025,7 @@ def _patch_L_segment_chart(slide, chart_name):
     NS_C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 
     # Read S2 A block for all 8 segments
-    _L_SEGMENTS = ["BK业务","永明经代","同行经代","天领业务","ICLUB业务","成事家办","合伙转介业务","IFA业务"]
+    _L_SEGMENTS = ["BK业务","永明经代","同行经代","天领业务","ICLUB业务","成事家办","合伙转介业务","IFA业务","MGA业务"]
     _s2a = S2["A"]
 
     issued_vals, unbat_vals, pend_vals, gap_vals = [], [], [], []
@@ -1280,7 +1281,7 @@ _fix_chart_dlbls_positions(_SL_SUNLIFE, "Chart 0")
 print("\n[Slide 3]")
 # (channel trend charts handled below via C9013-C9037)
 
-CHANNEL_ORDER = ["永明经代","天领业务","BK业务","合伙转介业务","成事家办","同行经代","ICLUB业务"]
+CHANNEL_ORDER = ["永明经代","天领业务","BK业务","合伙转介业务","成事家办","同行经代","ICLUB业务","MGA业务"]
 # Chart 0-6 don't exist; channel charts use names C9013-C9037 on Slide 4 (slides[3])
 # Skip Chart 0-6 loop — already handled by C9013-C9037 below
 
@@ -1447,6 +1448,7 @@ _G_SEGS = [
     ("成事家办",     "Shape 75", "Text 76"),
     ("合伙转介业务", "Shape 77", "Text 78"),
     ("IFA业务",      "Shape 79", "Text 80"),
+    ("MGA业务",      "Shape 81", "Text 82"),
 ]
 
 # G bubble chart + H waterfall: in full 11-slide deck these are on Slide 4 (slides[3]).
@@ -1519,8 +1521,9 @@ def _bar_h(m_val):    return max(int(abs(m_val) * _EPM), 800)
 _wv_bk = CH_BK["issued_m"];    _wv_ym = CH_YMJD["issued_m"]
 _wv_th = CH_THJD["issued_m"];  _wv_tl = CH_TL["issued_m"]
 _wv_ic = CH_ICLUB["issued_m"]; _wv_cs = CH_CSJB["issued_m"]
-_wv_hh = CH_HHZJ["issued_m"];  _wv_ub = UNBAT_APE_M; _wv_pd = PEND_APE_M
-_wv_gap = _WF_MAX - (_wv_bk+_wv_ym+_wv_th+_wv_tl+_wv_ic+_wv_cs+_wv_hh+_wv_ub+_wv_pd)
+_wv_hh = CH_HHZJ["issued_m"];  _wv_mga = CH_MGA["issued_m"]
+_wv_ub = UNBAT_APE_M; _wv_pd = PEND_APE_M
+_wv_gap = _WF_MAX - (_wv_bk+_wv_ym+_wv_th+_wv_tl+_wv_ic+_wv_cs+_wv_hh+_wv_mga+_wv_ub+_wv_pd)
 
 # Bar shapes — FIXED order from PPT left-position scan:
 # Shape 102(BK), Shape 106(永明), Shape_313(同行),
@@ -2238,10 +2241,8 @@ SLIDE3_SUBS = [
     # FIX 2: 批核件数使用 SUN_ISSUED_CNT_B（从S2 B合计行），不再使用硬编码"526件"
     ("504件  |  达成率30.4%",
      f"{SUN_ISSUED_CNT_B}件  |  达成率{SUN_RATE:.1f}%"),
-    ("目标\n976M", f"目标\n{SUN_TARGET_M:.0f}M"),
-    ("976M", f"{SUN_TARGET_M:.0f}M"),
-    # FIX 1: 缺口使用 SUN_GAP_M = SUN_TARGET_M - SUN_ISSUED_M
-    ("|  缺口679M", f"|  缺口{SUN_GAP_M:.0f}M"),
+    # FIX 1: 目标+缺口在同一个段落中，需要一起替换
+    ("目标976M  |  缺口679M", f"目标{SUN_TARGET_M:.0f}M  |  缺口{SUN_GAP_M:.0f}M"),
     ("30.4%", fmt_pct(SUN_RATE)),
 ]
 

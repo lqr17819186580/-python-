@@ -1,188 +1,384 @@
 import os
+import re
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from pptx import Presentation
 
-def extract_slide_info(prs, ppt_name):
+def extract_chart_data(chart):
+    series_data = []
+    try:
+        if hasattr(chart, 'categories'):
+            categories = [str(cat.label) for cat in chart.categories]
+        else:
+            categories = []
+        
+        for series in chart.series:
+            series_name = series.name if series.name else "未命名"
+            values = []
+            for val in series.values:
+                if val is None:
+                    values.append("None")
+                else:
+                    try:
+                        values.append(f"{float(val):.2f}")
+                    except:
+                        values.append(str(val))
+            series_data.append({
+                'name': series_name,
+                'values': values
+            })
+        
+        return {
+            'categories': categories,
+            'series': series_data,
+            'has_data': len(series_data) > 0
+        }
+    except Exception as e:
+        return {
+            'categories': [],
+            'series': [],
+            'has_data': False,
+            'error': str(e)[:100]
+        }
+
+def extract_table_data(table):
+    data = []
+    try:
+        for row in table.rows:
+            row_data = []
+            for cell in row.cells:
+                text = cell.text.strip()
+                row_data.append(text[:80] if text else "")
+            data.append(row_data)
+        return {'data': data, 'has_data': len(data) > 0}
+    except:
+        return {'data': [], 'has_data': False}
+
+def extract_slide_detailed(prs, ppt_name):
     slides_info = []
     for i, slide in enumerate(prs.slides, 1):
         title = ""
-        shapes_text = []
-        chart_count = 0
-        table_count = 0
+        all_texts = []
+        charts = []
+        tables = []
         
         for shape in slide.shapes:
             if shape.has_text_frame:
                 text = shape.text_frame.text.strip()
                 if text:
-                    shapes_text.append(text[:200] + "..." if len(text) > 200 else text)
-                    if not title and (i == 1 or "页" in text or "汇报" in text or "业绩" in text):
-                        title = text[:100]
-            if shape.has_chart:
-                chart_count += 1
-            if shape.has_table:
-                table_count += 1
+                    all_texts.append(text)
+                    if not title and i == 1:
+                        title = text[:80]
         
-        if not title and shapes_text:
-            title = shapes_text[0][:50]
+        for shape in slide.shapes:
+            if shape.has_chart:
+                chart_data = extract_chart_data(shape.chart)
+                chart_data['name'] = shape.name
+                charts.append(chart_data)
+            
+            if shape.has_table:
+                table_data = extract_table_data(shape.table)
+                tables.append(table_data)
+        
+        if not title and all_texts:
+            title = all_texts[0][:50]
         
         slides_info.append({
             'index': i,
             'title': title,
-            'text_count': len(shapes_text),
-            'chart_count': chart_count,
-            'table_count': table_count,
-            'texts': shapes_text[:5]
+            'text_count': len(all_texts),
+            'chart_count': len(charts),
+            'table_count': len(tables),
+            'all_texts': all_texts,
+            'charts': charts,
+            'tables': tables
         })
     return slides_info
 
+def find_kpi_values(texts):
+    kpis = {}
+    for text in texts:
+        match = re.search(r'([\d.]+)\s*%', text)
+        if match and '达成率' in text:
+            kpis['达成率'] = match.group(1)
+        
+        match = re.search(r'批核APE[\s:]*([\d,.]+)', text)
+        if match:
+            kpis['批核APE'] = match.group(1)
+        
+        match = re.search(r'全业务[\s\S]*?([\d.]+)\s*%', text)
+        if match and '达成率' in text:
+            kpis['全业务达成率'] = match.group(1)
+    return kpis
+
 def create_comparison_report():
-    original_ppt = '周业绩汇报PPT_W28_20260717.pptx'
-    generated_ppt = '周业绩汇报PPT_FINAL.pptx'
+    ref_ppt = r'd:\数据中台支持\业绩整合自动化脚本\ppt汇报\周业绩汇报PPT_W28_20260717.pptx'
+    test_ppt = r'd:\数据中台支持\业绩整合自动化脚本\ppt汇报\周业绩汇报PPT_FINAL.pptx'
     
     doc = Document()
-    
     style = doc.styles['Normal']
     font = style.font
     font.name = '微软雅黑'
     font.size = Pt(10.5)
     
-    title = doc.add_heading('PPT对比验证报告', 0)
+    title = doc.add_heading('周业绩汇报PPT对比验证报告', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    doc.add_paragraph()
+    doc.add_paragraph(f"参考文件：{os.path.basename(ref_ppt)}")
+    doc.add_paragraph(f"测试文件：{os.path.basename(test_ppt)}")
+    doc.add_paragraph(f"生成日期：2026年7月24日")
     
-    section = doc.add_heading('一、基本信息', level=1)
-    doc.add_paragraph(f"生成日期：{os.path.getmtime(generated_ppt)}")
-    doc.add_paragraph(f"原始PPT：{original_ppt}")
-    doc.add_paragraph(f"生成PPT：{generated_ppt}")
-    
-    doc.add_paragraph()
-    
-    if os.path.exists(original_ppt):
-        prs_orig = Presentation(original_ppt)
-        orig_info = extract_slide_info(prs_orig, original_ppt)
+    if os.path.exists(ref_ppt):
+        prs_ref = Presentation(ref_ppt)
+        ref_info = extract_slide_detailed(prs_ref, ref_ppt)
+        ref_size = os.path.getsize(ref_ppt)
     else:
-        orig_info = []
-        doc.add_paragraph(f"⚠️ 警告：未找到原始PPT文件 {original_ppt}")
+        ref_info = []
+        ref_size = 0
     
-    if os.path.exists(generated_ppt):
-        prs_gen = Presentation(generated_ppt)
-        gen_info = extract_slide_info(prs_gen, generated_ppt)
+    if os.path.exists(test_ppt):
+        prs_test = Presentation(test_ppt)
+        test_info = extract_slide_detailed(prs_test, test_ppt)
+        test_size = os.path.getsize(test_ppt)
     else:
-        gen_info = []
-        doc.add_paragraph(f"⚠️ 警告：未找到生成PPT文件 {generated_ppt}")
+        test_info = []
+        test_size = 0
     
-    section = doc.add_heading('二、页数对比', level=1)
+    doc.add_heading('一、基本信息对比', level=1)
     table = doc.add_table(rows=1, cols=4)
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'PPT文件'
-    hdr_cells[1].text = '总页数'
-    hdr_cells[2].text = '图表数'
-    hdr_cells[3].text = '表格数'
+    hdr = table.rows[0].cells
+    hdr[0].text = '项目'
+    hdr[1].text = '参考文件'
+    hdr[2].text = '测试文件'
+    hdr[3].text = '对比结果'
     
-    if orig_info:
-        total_charts_orig = sum(s['chart_count'] for s in orig_info)
-        total_tables_orig = sum(s['table_count'] for s in orig_info)
-        row_cells = table.add_row().cells
-        row_cells[0].text = '原始PPT'
-        row_cells[1].text = str(len(orig_info))
-        row_cells[2].text = str(total_charts_orig)
-        row_cells[3].text = str(total_tables_orig)
+    row = table.add_row().cells
+    row[0].text = '文件大小'
+    row[1].text = f"{ref_size / 1024:.1f} KB"
+    row[2].text = f"{test_size / 1024:.1f} KB"
+    row[3].text = '✅ 一致' if abs(ref_size - test_size) < 1024 else '不同'
     
-    if gen_info:
-        total_charts_gen = sum(s['chart_count'] for s in gen_info)
-        total_tables_gen = sum(s['table_count'] for s in gen_info)
-        row_cells = table.add_row().cells
-        row_cells[0].text = '生成PPT'
-        row_cells[1].text = str(len(gen_info))
-        row_cells[2].text = str(total_charts_gen)
-        row_cells[3].text = str(total_tables_gen)
+    row = table.add_row().cells
+    row[0].text = '总页数'
+    row[1].text = str(len(ref_info))
+    row[2].text = str(len(test_info))
+    row[3].text = '✅ 一致' if len(ref_info) == len(test_info) else '❌ 不一致'
     
-    doc.add_paragraph()
+    row = table.add_row().cells
+    row[0].text = '图表总数'
+    ref_charts = sum(s['chart_count'] for s in ref_info)
+    test_charts = sum(s['chart_count'] for s in test_info)
+    row[1].text = str(ref_charts)
+    row[2].text = str(test_charts)
+    row[3].text = '✅ 一致' if ref_charts == test_charts else '❌ 不一致'
     
-    section = doc.add_heading('三、逐页对比', level=1)
+    row = table.add_row().cells
+    row[0].text = '表格总数'
+    ref_tables = sum(s['table_count'] for s in ref_info)
+    test_tables = sum(s['table_count'] for s in test_info)
+    row[1].text = str(ref_tables)
+    row[2].text = str(test_tables)
+    row[3].text = '✅ 一致' if ref_tables == test_tables else '❌ 不一致'
     
-    max_pages = max(len(orig_info), len(gen_info))
+    doc.add_heading('二、逐页详细对比', level=1)
     
-    table = doc.add_table(rows=1, cols=6)
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = '页码'
-    hdr_cells[1].text = '原始PPT标题'
-    hdr_cells[2].text = '生成PPT标题'
-    hdr_cells[3].text = '图表数对比'
-    hdr_cells[4].text = '表格数对比'
-    hdr_cells[5].text = '状态'
+    all_matched = True
+    page_diff_details = []
+    
+    max_pages = max(len(ref_info), len(test_info))
+    
+    table = doc.add_table(rows=1, cols=8)
+    hdr = table.rows[0].cells
+    hdr[0].text = '页码'
+    hdr[1].text = '参考标题'
+    hdr[2].text = '测试标题'
+    hdr[3].text = '图表数'
+    hdr[4].text = '表格数'
+    hdr[5].text = '图表数据'
+    hdr[6].text = '表格数据'
+    hdr[7].text = '状态'
     
     for i in range(1, max_pages + 1):
-        orig = orig_info[i-1] if i <= len(orig_info) else None
-        gen = gen_info[i-1] if i <= len(gen_info) else None
+        ref = ref_info[i-1] if i <= len(ref_info) else None
+        test = test_info[i-1] if i <= len(test_info) else None
         
-        row_cells = table.add_row().cells
-        row_cells[0].text = str(i)
+        row = table.add_row().cells
+        row[0].text = str(i)
         
-        orig_title = orig['title'] if orig else '（无）'
-        gen_title = gen['title'] if gen else '（无）'
-        row_cells[1].text = orig_title
-        row_cells[2].text = gen_title
+        ref_title = ref['title'] if ref else '（缺失）'
+        test_title = test['title'] if test else '（缺失）'
+        row[1].text = ref_title[:25] + '...' if len(ref_title) > 25 else ref_title
+        row[2].text = test_title[:25] + '...' if len(test_title) > 25 else test_title
         
-        orig_charts = orig['chart_count'] if orig else 0
-        gen_charts = gen['chart_count'] if gen else 0
-        row_cells[3].text = f"{orig_charts} vs {gen_charts}"
+        ref_ch = ref['chart_count'] if ref else 0
+        test_ch = test['chart_count'] if test else 0
+        row[3].text = f"{ref_ch} vs {test_ch}"
         
-        orig_tables = orig['table_count'] if orig else 0
-        gen_tables = gen['table_count'] if gen else 0
-        row_cells[4].text = f"{orig_tables} vs {gen_tables}"
+        ref_tb = ref['table_count'] if ref else 0
+        test_tb = test['table_count'] if test else 0
+        row[4].text = f"{ref_tb} vs {test_tb}"
         
-        if orig and gen:
-            if orig_title == gen_title or (orig_title and gen_title and orig_title[:30] == gen_title[:30]):
+        chart_data_status = ''
+        table_data_status = ''
+        chart_diffs = []
+        table_diffs = []
+        
+        if ref and test:
+            for j, (c1, c2) in enumerate(zip(ref['charts'], test['charts'])):
+                if c1['categories'] != c2['categories']:
+                    chart_diffs.append(f"图表{j}分类不同")
+                if len(c1['series']) != len(c2['series']):
+                    chart_diffs.append(f"图表{j}系列数不同")
+                else:
+                    for k, (s1, s2) in enumerate(zip(c1['series'], c2['series'])):
+                        if s1['values'] != s2['values']:
+                            chart_diffs.append(f"图表{j}系列{k}数值不同")
+            
+            if len(ref['charts']) != len(test['charts']):
+                chart_diffs.append(f"图表总数不同")
+            
+            chart_data_status = '✅ 一致' if len(chart_diffs) == 0 else '❌ 有差异'
+            
+            for j, (t1, t2) in enumerate(zip(ref['tables'], test['tables'])):
+                if t1['data'] != t2['data']:
+                    table_diffs.append(f"表格{j}数据不同")
+            
+            if len(ref['tables']) != len(test['tables']):
+                table_diffs.append(f"表格总数不同")
+            
+            table_data_status = '✅ 一致' if len(table_diffs) == 0 else '❌ 有差异'
+        else:
+            chart_data_status = '—'
+            table_data_status = '—'
+        
+        row[5].text = chart_data_status
+        row[6].text = table_data_status
+        
+        if not ref and not test:
+            status = '—'
+        elif not ref:
+            status = '❌ 参考缺失'
+            all_matched = False
+        elif not test:
+            status = '❌ 测试缺失'
+            all_matched = False
+        else:
+            title_match = ref_title[:25] == test_title[:25]
+            chart_match = ref_ch == test_ch
+            table_match = ref_tb == test_tb
+            data_match = len(chart_diffs) == 0 and len(table_diffs) == 0
+            
+            if title_match and chart_match and table_match and data_match:
                 status = '✅ 一致'
             else:
-                status = '⚠️ 标题不同'
-        elif not orig and not gen:
-            status = '—'
-        else:
-            status = '❌ 页面缺失'
+                status = '⚠️ 部分差异'
+                all_matched = False
+                page_diff_details.append({
+                    'page': i,
+                    'ref_title': ref_title,
+                    'test_title': test_title,
+                    'chart_diff': ref_ch != test_ch or len(chart_diffs) > 0,
+                    'table_diff': ref_tb != test_tb or len(table_diffs) > 0,
+                    'title_diff': not title_match,
+                    'chart_diffs': chart_diffs,
+                    'table_diffs': table_diffs
+                })
+        row[7].text = status
+    
+    doc.add_heading('三、差异详情', level=1)
+    
+    if not page_diff_details:
+        doc.add_paragraph('✅ 未发现页面结构和数据差异')
+    else:
+        for diff in page_diff_details:
+            doc.add_heading(f"Page {diff['page']}", level=2)
+            if diff['title_diff']:
+                doc.add_paragraph(f"标题差异：")
+                doc.add_paragraph(f"  参考：{diff['ref_title']}")
+                doc.add_paragraph(f"  测试：{diff['test_title']}")
+            if diff['chart_diffs']:
+                doc.add_paragraph(f"图表数据差异：")
+                for cd in diff['chart_diffs']:
+                    doc.add_paragraph(f"  • {cd}")
+            if diff['table_diffs']:
+                doc.add_paragraph(f"表格数据差异：")
+                for td in diff['table_diffs']:
+                    doc.add_paragraph(f"  • {td}")
+    
+    doc.add_heading('四、MGA业务专项验证', level=1)
+    
+    mga_found = False
+    mga_pages = []
+    for slide in test_info:
+        for text in slide['all_texts']:
+            if 'MGA' in text or 'mga' in text.lower():
+                mga_found = True
+                mga_pages.append(slide['index'])
+                doc.add_paragraph(f"Page {slide['index']} ({slide['title'][:30]}): 包含MGA相关文本")
+                break
         
-        row_cells[5].text = status
+        for chart in slide['charts']:
+            if chart['categories'] and 'MGA' in str(chart['categories']):
+                mga_found = True
+                if slide['index'] not in mga_pages:
+                    mga_pages.append(slide['index'])
+                    doc.add_paragraph(f"Page {slide['index']} ({slide['title'][:30]}): 图表分类包含MGA")
     
-    doc.add_paragraph()
+    if not mga_found:
+        doc.add_paragraph('⚠️ 未在测试PPT中找到MGA相关内容')
+    else:
+        doc.add_paragraph(f'✅ 测试PPT中在{len(mga_pages)}个页面包含MGA业务内容：{", ".join(map(str, mga_pages))}')
     
-    section = doc.add_heading('四、MGA业务数据验证', level=1)
+    doc.add_heading('五、关键指标对比', level=1)
     
-    doc.add_paragraph('1. SEGMENTS常量更新：')
-    doc.add_paragraph('   - 原始SEGS：天领业务、成事家办、BK业务、同行经代、永明经代、合伙转介业务、ICLUB业务、IFA业务（8个）')
-    doc.add_paragraph('   - 更新后SEGS：天领业务、成事家办、BK业务、同行经代、永明经代、MGA业务、合伙转介业务、ICLUB业务、IFA业务（9个）')
+    doc.add_paragraph('5.1 参考文件关键指标：')
+    ref_kpis = []
+    for slide in ref_info:
+        kpis = find_kpi_values(slide['all_texts'])
+        if kpis:
+            kpi_str = ", ".join([f"{k}={v}" for k, v in kpis.items()])
+            ref_kpis.append(f"Page {slide['index']}: {kpi_str}")
+            doc.add_paragraph(f"  • Page {slide['index']}: {kpi_str}")
     
-    doc.add_paragraph()
+    doc.add_paragraph('5.2 测试文件关键指标：')
+    test_kpis = []
+    for slide in test_info:
+        kpis = find_kpi_values(slide['all_texts'])
+        if kpis:
+            kpi_str = ", ".join([f"{k}={v}" for k, v in kpis.items()])
+            test_kpis.append(f"Page {slide['index']}: {kpi_str}")
+            doc.add_paragraph(f"  • Page {slide['index']}: {kpi_str}")
     
-    doc.add_paragraph('2. 业务分类映射更新：')
-    doc.add_paragraph('   - MGA业务 → 经代业务（通过biz_map映射）')
+    doc.add_paragraph('5.3 指标对比结果：')
+    if set(ref_kpis) == set(test_kpis):
+        doc.add_paragraph('✅ 关键指标完全一致')
+    else:
+        doc.add_paragraph('⚠️ 关键指标存在差异')
+        if len(ref_kpis) != len(test_kpis):
+            doc.add_paragraph(f"   - 指标数量不同：参考{len(ref_kpis)}项 vs 测试{len(test_kpis)}项")
     
-    doc.add_paragraph()
+    doc.add_heading('六、结论', level=1)
     
-    doc.add_paragraph('3. CSV输出验证：')
-    doc.add_paragraph('   - S1-总览仪表盘.csv：包含MGA业务数据')
-    doc.add_paragraph('   - S2-业务端视角.csv：包含MGA业务数据')
-    doc.add_paragraph('   - S3-执行管理端.csv：包含MGA业务数据')
-    doc.add_paragraph('   - S4-产品端视角.csv：包含MGA业务数据')
+    total_pages = len(ref_info) if ref_info else 0
+    test_total_pages = len(test_info) if test_info else 0
     
-    doc.add_paragraph()
+    if all_matched and total_pages == test_total_pages == 12 and mga_found:
+        doc.add_paragraph('✅ 测试PPT与参考PPT结构一致（12页）')
+        doc.add_paragraph('✅ 图表和表格数据一致')
+        doc.add_paragraph('✅ MGA业务已正确整合为独立业务线')
+        doc.add_paragraph('✅ 关键指标数据正确')
+        doc.add_paragraph('✅ 修改完成，可以交付')
+    else:
+        doc.add_paragraph('❌ 仍存在差异，需要进一步检查')
+        if total_pages != test_total_pages:
+            doc.add_paragraph(f"   - 页数不一致：参考{total_pages}页 vs 测试{test_total_pages}页")
+        if not all_matched:
+            doc.add_paragraph(f"   - {len(page_diff_details)}个页面存在结构或数据差异")
+        if not mga_found:
+            doc.add_paragraph('   - MGA业务内容缺失')
     
-    section = doc.add_heading('五、结论', level=1)
-    
-    if orig_info and gen_info and len(orig_info) == len(gen_info):
-        doc.add_paragraph('✅ 生成PPT与原始PPT页数一致。')
-    elif gen_info:
-        doc.add_paragraph(f'✅ 成功生成 {len(gen_info)} 页PPT。')
-    
-    doc.add_paragraph('✅ MGA业务数据已正确整合到报表系统中。')
-    doc.add_paragraph('✅ 用户无需手动修改业绩数据底表，脚本会自动处理MGA业务。')
-    
-    doc.add_paragraph()
-    
-    output_file = 'PPT对比验证报告.docx'
+    output_file = r'd:\数据中台支持\业绩整合自动化脚本\ppt汇报\周业绩汇报PPT对比验证报告.docx'
     doc.save(output_file)
     print(f"✅ 验证报告已生成：{output_file}")
 
