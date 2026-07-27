@@ -2966,6 +2966,25 @@ def _add_mga_to_slide5():
         "MGA业务": (_mg_is, _mg_un),
     }
     
+    biz_info = {
+        "IFA业务": {"name_shape": "Text 81", "total_shape": "Text 82", "stack_shape": "Text 84",
+                   "color_shapes": ["Shape 80", "Shape 83"]},
+        "ICLUB": {"name_shape": "Text 53", "total_shape": "Text 54", "pct_shapes": ["Text 57"], "stack_shape": "Text 59",
+                  "color_shapes": ["Shape 52", "Shape 55", "Shape 56", "Shape 58"]},
+        "同行经代": {"name_shape": "Text 33", "total_shape": "Text 34", "pct_shapes": ["Text 37", "Text 39"], "stack_shape": "Text 41",
+                    "color_shapes": ["Shape 32", "Shape 35", "Shape 36", "Shape 38", "Shape 40"]},
+        "成事家办": {"name_shape": "Text 61", "total_shape": "Text 62", "pct_shapes": ["Text 65", "Text 67"], "stack_shape": "Text 69",
+                    "color_shapes": ["Shape 60", "Shape 63", "Shape 64", "Shape 66", "Shape 68"]},
+        "合伙转介": {"name_shape": "Text 71", "total_shape": "Text 72", "pct_shapes": ["Text 75", "Text 77"], "stack_shape": "Text 79",
+                    "color_shapes": ["Shape 70", "Shape 73", "Shape 74", "Shape 76", "Shape 78"]},
+        "BK业务": {"name_shape": "Text 13", "total_shape": "Text 14", "pct_shapes": ["Text 17", "Text 19"], "stack_shape": "Text 21",
+                  "color_shapes": ["Shape 12", "Shape 15", "Shape 16", "Shape 18", "Shape 20"]},
+        "天领业务": {"name_shape": "Text 43", "total_shape": "Text 44", "pct_shapes": ["Text 47", "Text 49"], "stack_shape": "Text 51",
+                    "color_shapes": ["Shape 42", "Shape 45", "Shape 46", "Shape 48", "Shape 50"]},
+        "永明经代": {"name_shape": "Text 23", "total_shape": "Text 24", "pct_shapes": ["Text 27", "Text 29"], "stack_shape": "Text 31",
+                    "color_shapes": ["Shape 22", "Shape 25", "Shape 26", "Shape 28", "Shape 30"]},
+    }
+    
     section_start = Emu(1350000)
     section_end = Emu(5800000)
     total_height = section_end - section_start
@@ -2979,26 +2998,39 @@ def _add_mga_to_slide5():
     stack_left = Emu(3198368)
     stack_height = Emu(150000)
     total_top_offset = Emu(150000)
+    color_bar_height = Emu(347472)
+    stack_color_height = Emu(274320)
     
     for idx, (biz_name, ch_data) in enumerate(biz_order):
         line_top = section_start + idx * line_height
         
-        if biz_name in ["IFA业务", "ICLUB", "同行经代", "成事家办", "合伙转介", "BK业务", "天领业务", "永明经代"]:
+        if biz_name in biz_info:
+            info = biz_info[biz_name]
+            all_shape_names = [info["name_shape"], info["total_shape"], info["stack_shape"]] + info.get("pct_shapes", [])
+            
             for s in slide.shapes:
-                if s.has_text_frame and s.name.startswith('Text'):
-                    text = s.text_frame.text.strip()
-                    if text == biz_name:
+                if s.name in all_shape_names:
+                    if s.name == info["name_shape"]:
                         s.top = line_top
                         s.height = name_height
-                    elif text.startswith('合计') and s.top >= line_top and s.top < line_top + line_height:
+                    elif s.name == info["total_shape"]:
                         s.top = line_top + total_top_offset
                         s.height = name_height
-                    elif '▌' in text and s.top >= line_top and s.top < line_top + line_height:
-                        s.top = line_top + Emu(30000)
+                    elif s.name == info["stack_shape"]:
+                        s.top = line_top + (color_bar_height - stack_height) // 2
                         s.height = stack_height
-                    elif '%' in text and len(text) <= 5 and s.top >= line_top and s.top < line_top + line_height:
-                        s.top = line_top + Emu(30000) + Emu(9144)
-                        s.height = Emu(140000)
+                    elif s.name in info.get("pct_shapes", []):
+                        s.top = line_top + (color_bar_height - Emu(164592)) // 2
+                        s.height = Emu(164592)
+            
+            for shape_name in info.get("color_shapes", []):
+                for s in slide.shapes:
+                    if s.name == shape_name:
+                        s.top = line_top
+                        if s.width < 100000:
+                            s.height = color_bar_height
+                        else:
+                            s.height = stack_color_height
         
         if biz_name == "MGA业务":
             tb_name = slide.shapes.add_textbox(name_left, line_top, name_width, name_height)
@@ -3009,7 +3041,7 @@ def _add_mga_to_slide5():
             para.alignment = PP_ALIGN.LEFT
             run = para.add_run()
             run.text = "MGA业务"
-            run.font.size = Pt(10)
+            run.font.size = Pt(9)
             run.font.bold = True
             run.font.color.rgb = RGBColor(0x20, 0x20, 0x20)
             run.font.name = 'Calibri'
@@ -3024,7 +3056,7 @@ def _add_mga_to_slide5():
             para.alignment = PP_ALIGN.LEFT
             run = para.add_run()
             run.text = total_text
-            run.font.size = Pt(10)
+            run.font.size = Pt(9)
             run.font.bold = False
             run.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
             run.font.name = 'Calibri'
@@ -3032,7 +3064,8 @@ def _add_mga_to_slide5():
             
             pct_issued, pct_unbat = pct_map[biz_name]
             
-            tb_pct1 = slide.shapes.add_textbox(pct1_left, line_top + Emu(30000) + Emu(9144), Emu(500000), Emu(140000))
+            pct_top_pos = line_top + (color_bar_height - Emu(164592)) // 2
+            tb_pct1 = slide.shapes.add_textbox(pct1_left, pct_top_pos, Emu(500000), Emu(164592))
             tf_pct1 = tb_pct1.text_frame
             tf_pct1.margin_left = tf_pct1.margin_right = tf_pct1.margin_top = tf_pct1.margin_bottom = Emu(0)
             tf_pct1.word_wrap = False
@@ -3040,13 +3073,13 @@ def _add_mga_to_slide5():
             para.alignment = PP_ALIGN.CENTER
             run = para.add_run()
             run.text = f"{pct_issued}%"
-            run.font.size = Pt(10)
+            run.font.size = Pt(9)
             run.font.bold = True
             run.font.color.rgb = RGBColor(0x1A, 0x6B, 0x3A)
             run.font.name = 'Calibri'
             tb_pct1.name = "Text_MGA_pct1"
             
-            tb_pct2 = slide.shapes.add_textbox(pct2_left, line_top + Emu(30000) + Emu(9144), Emu(500000), Emu(140000))
+            tb_pct2 = slide.shapes.add_textbox(pct2_left, pct_top_pos, Emu(500000), Emu(164592))
             tf_pct2 = tb_pct2.text_frame
             tf_pct2.margin_left = tf_pct2.margin_right = tf_pct2.margin_top = tf_pct2.margin_bottom = Emu(0)
             tf_pct2.word_wrap = False
@@ -3054,14 +3087,15 @@ def _add_mga_to_slide5():
             para.alignment = PP_ALIGN.CENTER
             run = para.add_run()
             run.text = f"{pct_unbat}%"
-            run.font.size = Pt(10)
+            run.font.size = Pt(9)
             run.font.bold = True
             run.font.color.rgb = RGBColor(0xC8, 0x89, 0x0A)
             run.font.name = 'Calibri'
             tb_pct2.name = "Text_MGA_pct2"
             
+            stack_top_pos = line_top + (color_bar_height - stack_height) // 2
             stack_text = _stack_label(ch_data)
-            tb_stack = slide.shapes.add_textbox(stack_left, line_top + Emu(30000), Emu(1500000), stack_height)
+            tb_stack = slide.shapes.add_textbox(stack_left, stack_top_pos, Emu(1500000), stack_height)
             tf_stack = tb_stack.text_frame
             tf_stack.margin_left = tf_stack.margin_right = tf_stack.margin_top = tf_stack.margin_bottom = Emu(0)
             tf_stack.word_wrap = False
@@ -3069,11 +3103,42 @@ def _add_mga_to_slide5():
             para.alignment = PP_ALIGN.LEFT
             run = para.add_run()
             run.text = stack_text
-            run.font.size = Pt(10)
+            run.font.size = Pt(9)
             run.font.bold = False
             run.font.color.rgb = RGBColor(0x20, 0x20, 0x20)
             run.font.name = 'Calibri'
             tb_stack.name = "Text_MGA_stack"
+            
+            s_color = slide.shapes.add_shape(1, Emu(226568), line_top, Emu(36576), color_bar_height)
+            s_color.fill.solid()
+            s_color.fill.fore_color.rgb = RGBColor(0xD1, 0xD5, 0xDB)
+            s_color.line.fill.solid()
+            s_color.line.fill.fore_color.rgb = RGBColor(0xD1, 0xD5, 0xDB)
+            s_color.name = "Shape_MGA_0"
+            
+            issued_w = int(ch_data['issued_m'] / ch_data['total_m'] * 1572768) if ch_data['total_m'] > 0 else 0
+            s_issued = slide.shapes.add_shape(1, Emu(1579880), line_top + (color_bar_height - stack_color_height) // 2, Emu(issued_w), stack_color_height)
+            s_issued.fill.solid()
+            s_issued.fill.fore_color.rgb = RGBColor(0x1A, 0x6B, 0x3A)
+            s_issued.line.fill.solid()
+            s_issued.line.fill.fore_color.rgb = RGBColor(0x1A, 0x6B, 0x3A)
+            s_issued.name = "Shape_MGA_1"
+            
+            unbat_w = int(ch_data['unbat_m'] / ch_data['total_m'] * 1572768) if ch_data['total_m'] > 0 else 0
+            s_unbat = slide.shapes.add_shape(1, Emu(1579880) + Emu(issued_w), line_top + (color_bar_height - stack_color_height) // 2, Emu(unbat_w), stack_color_height)
+            s_unbat.fill.solid()
+            s_unbat.fill.fore_color.rgb = RGBColor(0xC8, 0x89, 0x0A)
+            s_unbat.line.fill.solid()
+            s_unbat.line.fill.fore_color.rgb = RGBColor(0xC8, 0x89, 0x0A)
+            s_unbat.name = "Shape_MGA_2"
+            
+            pend_w = max(0, 1572768 - issued_w - unbat_w)
+            s_pend = slide.shapes.add_shape(1, Emu(1579880) + Emu(issued_w) + Emu(unbat_w), line_top + (color_bar_height - stack_color_height) // 2, Emu(pend_w), stack_color_height)
+            s_pend.fill.solid()
+            s_pend.fill.fore_color.rgb = RGBColor(0x1E, 0x40, 0xAF)
+            s_pend.line.fill.solid()
+            s_pend.line.fill.fore_color.rgb = RGBColor(0x1E, 0x40, 0xAF)
+            s_pend.name = "Shape_MGA_3"
     
     print(f"  [MGA] added to Slide 5 J section and all 9 business lines rearranged")
 
