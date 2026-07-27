@@ -61,7 +61,7 @@ class Config:
 
     # --- Heat matrix business-line order (must match CSV left-column spelling) ---
     heat_business_order: list = field(default_factory=lambda: [
-        '天领业务','成事家办','BK业务','同行经代','永明经代','合伙转介业务','ICLUB业务',
+        '天领业务','成事家办','BK业务','同行经代','永明经代','合伙转介业务','ICLUB业务','MGA业务',
     ])
     heat_row_colors: dict = field(default_factory=lambda: {
         '天领业务':    (0xB6,0xCC,0xDC),
@@ -71,6 +71,7 @@ class Config:
         '永明经代':    (0x9D,0xC5,0xB0),
         '合伙转介业务': (0xE8,0xE8,0xE8),
         'ICLUB业务':  (0xCF,0xB8,0xDE),
+        'MGA业务':    (0xF8,0xD7,0xDA),
     })
     heat_title_bar_rgb: tuple = (0x7E,0x1F,0x1F)
     heat_sowhat_bar_rgb: tuple = (0x2E,0x5E,0x3E)
