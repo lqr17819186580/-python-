@@ -742,9 +742,14 @@ def rebuild_heat_matrix_on_slide7(slide, s3_rows):
 # T 签批时效 table — rewrite from S3 section G
 # ---------------------------------------------------------------------------
 
-# T table row y-positions (from template inspection)
-T_TABLE_ROW_YS = [4224655, 4480560, 4736465, 4992370, 5248910, 5504815, 5760720, 6060440, 6316345]
-T_TABLE_TOTAL_Y = 6566060
+# T table row y-positions (recalculated for 9 business lines + totals row)
+# Start: 4224655, End: 6566060, Available space: 2341405 EMU
+# Row height: 2341405 / 10 = 234140 EMU per row
+T_TABLE_ROW_YS = [
+    4224655, 4458795, 4692935, 4927075, 5161215,
+    5395355, 5629495, 5863635, 6097775,
+]
+T_TABLE_TOTAL_Y = 6331915
 # T table column x-positions: 业务线, 件数, 件均APE(万), 平均时效, P90, 中位, 最大
 T_TABLE_COL_XS = [6348095, 7130480, 7841440, 8788100, 9621920, 10537020, 11451490]
 # S3 G row order (user requested: same as CSV)
@@ -758,9 +763,7 @@ T_TABLE_DISPLAY = {
 
 
 def update_t_table(slide, S3):
-    """Overwrite the T 签批时效 table with S3 G data.
-    Strategy: for each row y-band, find shapes at the 7 known column x-positions
-    and overwrite them. Remove any stale duplicate shapes from prior runs."""
+    """Rebuild the T 签批时效 table from scratch with S3 G data."""
     if 'G' not in S3:
         print("  [T] S3 G not found, skipping")
         return 0
@@ -772,77 +775,69 @@ def update_t_table(slide, S3):
         if name:
             lookup[name] = row
 
-    hits = 0
-    y_tol = 100000
+    # Table dimensions
+    TABLE_LEFT = Emu(6327775)
+    TABLE_TOP = Emu(4224655)
+    COL_WIDTHS = [
+        Emu(720000),   # 业务线
+        Emu(630000),   # 件数
+        Emu(850000),   # 件均APE(万)
+        Emu(850000),   # 平均时效
+        Emu(850000),   # P90
+        Emu(850000),   # 中位
+        Emu(850000),   # 最大
+    ]
+    TABLE_WIDTH = sum(COL_WIDTHS)
+    N_ROWS = len(T_TABLE_ROW_ORDER) + 1  # 9 business lines + totals
+    ROW_HEIGHT = Emu(234140)
+    TABLE_HEIGHT = ROW_HEIGHT * N_ROWS
 
-    # Known column x-positions from the 0404 template
-    # 业务线, 件数, 件均APE(万), 平均时效, P90, 中位, 最大
-    COL_XS = [6327775, 7130480, 7841440, 8788100, 9621920, 10537020, 11451490]
-    x_tol = 120000
+    # Colors
+    HEADER_BG = RGBColor(0x3A, 0x3A, 0x5C)
+    HEADER_TEXT = RGBColor(0xFF, 0xFF, 0xFF)
+    ROW_BG_EVEN = RGBColor(0xF8, 0xF8, 0xF8)
+    ROW_BG_ODD = RGBColor(0xEB, 0xEB, 0xEB)
+    TOTAL_BG = RGBColor(0xDD, 0xE8, 0xF2)
+    TEXT_BLACK = RGBColor(0x20, 0x20, 0x20)
+    TEXT_RED = RGBColor(0xC0, 0x39, 0x2B)
+    BORDER_COLOR = RGBColor(0xBB, 0xBB, 0xBB)
 
-    def set_text(sh, text):
-        for para in sh.text_frame.paragraphs:
-            if para.runs:
-                para.runs[0].text = str(text)
-                for r in para.runs[1:]:
-                    r.text = ""
-            else:
-                run = para.add_run()
-                run.text = str(text)
+    # Column headers
+    COL_HEADERS = ['业务线', '件数', '件均APE(万)', '平均时效(天)', 'P90时效(天)', '中位时效(天)', '最大时效(天)']
 
-    def find_shape_at(target_y, target_x):
-        """Find the CLOSEST text shape to (target_y, target_x)."""
-        best, best_dist = None, float('inf')
-        for sh in slide.shapes:
-            if not sh.has_text_frame or sh.top is None or sh.left is None:
-                continue
-            dy = abs(sh.top - target_y)
-            dx = abs(sh.left - target_x)
-            if dy < y_tol and dx < x_tol:
-                dist = dy + dx
-                if dist < best_dist:
-                    best, best_dist = sh, dist
-        return best
+    def add_text(left, top, width, height, text, size=9, bold=False,
+                 color=RGBColor(0x20, 0x20, 0x20), align=PP_ALIGN.CENTER, bg_color=None):
+        """Add a text cell with optional background."""
+        if bg_color is not None:
+            shp = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
+            shp.fill.solid()
+            shp.fill.fore_color.rgb = bg_color
+            shp.line.color.rgb = BORDER_COLOR
+            shp.line.width = Emu(3175)
+        tb = slide.shapes.add_textbox(left, top, width, height)
+        tf = tb.text_frame
+        tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = Emu(0)
+        tf.word_wrap = False
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        para = tf.paragraphs[0]
+        para.alignment = align
+        run = para.add_run()
+        run.text = str(text)
+        run.font.size = Pt(size)
+        run.font.bold = bold
+        run.font.color.rgb = color
+        run.font.name = 'Calibri'
+        return tb
 
-    # Also remove stale duplicate shapes from prior pipeline runs
-    # (shapes at x < 6300000 in the T-table area that don't belong to template)
-    stale_removed = 0
+    # Remove ALL existing shapes in the T-table area
+    removed = 0
     for sh in list(slide.shapes):
-        if sh.has_text_frame and sh.top and sh.left:
-            if 4200000 < sh.top < 6500000:
-                # Don't remove So What shapes
-                t = sh.text_frame.text.strip()
-                if 'So What' in t or len(t) > 60:
-                    continue
-                # Shapes to the LEFT of the label column (stale duplicates from prior runs)
-                if 6200000 < sh.left < 6320000:
+        if sh.has_text_frame and sh.top is not None and sh.left is not None:
+            if TABLE_TOP - Emu(10000) < sh.top < TABLE_TOP + TABLE_HEIGHT + Emu(10000):
+                if TABLE_LEFT - Emu(10000) < sh.left < TABLE_LEFT + TABLE_WIDTH + Emu(10000):
                     sh._element.getparent().remove(sh._element)
-                    stale_removed += 1
-                # Shapes to the RIGHT of the 最大时效 column (stale from old template layout)
-                elif sh.left > 11500000:
-                    sh._element.getparent().remove(sh._element)
-                    stale_removed += 1
-    if stale_removed:
-        print(f"  removed {stale_removed} stale T-table shapes")
-
-    def make_vals(biz_name, row_data):
-        display = T_TABLE_DISPLAY.get(biz_name, biz_name)
-        if row_data is not None:
-            cnt = int(num(row_data.get('件数', 0)))
-            avg_ape_wan = round(num(row_data.get('件均APE', 0)) / 10000) if cnt > 0 else 0
-            avg_tat = round(num(row_data.get('平均时效(天)', 0))) if cnt > 0 else 0
-            p90 = round(num(row_data.get('P90时效(天)', 0))) if cnt > 0 else 0
-            median = round(num(row_data.get('中位时效(天)', 0))) if cnt > 0 else 0
-            max_tat = round(num(row_data.get('最大时效(天)', 0))) if cnt > 0 else 0
-            return [display, str(cnt), str(avg_ape_wan), str(avg_tat),
-                    str(p90), str(median), str(max_tat)]
-        return [display, '0', '0', '0', '0', '0', '0']
-
-    def set_font_color(sh, rgb_color):
-        """Set all run font colors in a shape."""
-        for para in sh.text_frame.paragraphs:
-            for run in para.runs:
-                run.font.color.rgb = rgb_color
+                    removed += 1
+    print(f"  removed {removed} old T-table shapes")
 
     # Find the business line with the MAX average TAT (for red highlight)
     max_tat_biz = None
@@ -855,34 +850,64 @@ def update_t_table(slide, S3):
                 max_tat_val = avg
                 max_tat_biz = biz_name
 
-    RED = RGBColor(0xC0, 0x39, 0x2B)
-    BLACK = RGBColor(0x20, 0x20, 0x20)
+    # Draw header row
+    for ci, header in enumerate(COL_HEADERS):
+        left = TABLE_LEFT + sum(COL_WIDTHS[:ci])
+        add_text(left, TABLE_TOP, COL_WIDTHS[ci], ROW_HEIGHT, header,
+                 size=9, bold=True, color=HEADER_TEXT, align=PP_ALIGN.CENTER, bg_color=HEADER_BG)
 
-    # Write each business line row
+    # Draw data rows
+    hits = 0
     for ri, biz_name in enumerate(T_TABLE_ROW_ORDER):
-        if ri >= len(T_TABLE_ROW_YS):
-            break
-        ry = T_TABLE_ROW_YS[ri]
-        vals = make_vals(biz_name, lookup.get(biz_name))
+        row_top = TABLE_TOP + ROW_HEIGHT * (ri + 1)
+        bg_color = ROW_BG_EVEN if ri % 2 == 0 else ROW_BG_ODD
         is_max_row = (biz_name == max_tat_biz)
-        row_color = RED if is_max_row else BLACK
-        for ci, val in enumerate(vals):
-            if ci < len(COL_XS):
-                sh = find_shape_at(ry, COL_XS[ci])
-                if sh:
-                    set_text(sh, val)
-                    set_font_color(sh, row_color)
-                    hits += 1
 
-    # Write 合计 row
-    tot_vals = make_vals('合计', lookup.get('合计'))
-    tot_vals[0] = '合计'
+        # Get data
+        row_data = lookup.get(biz_name)
+        display = T_TABLE_DISPLAY.get(biz_name, biz_name)
+        if row_data is not None:
+            cnt = int(num(row_data.get('件数', 0)))
+            avg_ape_wan = round(num(row_data.get('件均APE', 0)) / 10000) if cnt > 0 else 0
+            avg_tat = round(num(row_data.get('平均时效(天)', 0))) if cnt > 0 else 0
+            p90 = round(num(row_data.get('P90时效(天)', 0))) if cnt > 0 else 0
+            median = round(num(row_data.get('中位时效(天)', 0))) if cnt > 0 else 0
+            max_tat = round(num(row_data.get('最大时效(天)', 0))) if cnt > 0 else 0
+            vals = [display, str(cnt), str(avg_ape_wan), str(avg_tat),
+                    str(p90), str(median), str(max_tat)]
+        else:
+            vals = [display, '0', '0', '0', '0', '0', '0']
+
+        # Draw cells
+        for ci, val in enumerate(vals):
+            left = TABLE_LEFT + sum(COL_WIDTHS[:ci])
+            align = PP_ALIGN.LEFT if ci == 0 else PP_ALIGN.CENTER
+            text_color = TEXT_RED if is_max_row else TEXT_BLACK
+            add_text(left, row_top, COL_WIDTHS[ci], ROW_HEIGHT, val,
+                     size=9, bold=(ci == 0), color=text_color, align=align, bg_color=bg_color)
+            hits += 1
+
+    # Draw totals row
+    tot_row_top = TABLE_TOP + ROW_HEIGHT * N_ROWS
+    tot_row_data = lookup.get('合计')
+    if tot_row_data is not None:
+        cnt = int(num(tot_row_data.get('件数', 0)))
+        avg_ape_wan = round(num(tot_row_data.get('件均APE', 0)) / 10000) if cnt > 0 else 0
+        avg_tat = round(num(tot_row_data.get('平均时效(天)', 0))) if cnt > 0 else 0
+        p90 = round(num(tot_row_data.get('P90时效(天)', 0))) if cnt > 0 else 0
+        median = round(num(tot_row_data.get('中位时效(天)', 0))) if cnt > 0 else 0
+        max_tat = round(num(tot_row_data.get('最大时效(天)', 0))) if cnt > 0 else 0
+        tot_vals = ['合计', str(cnt), str(avg_ape_wan), str(avg_tat),
+                    str(p90), str(median), str(max_tat)]
+    else:
+        tot_vals = ['合计', '0', '0', '0', '0', '0', '0']
+
     for ci, val in enumerate(tot_vals):
-        if ci < len(COL_XS):
-            sh = find_shape_at(T_TABLE_TOTAL_Y, COL_XS[ci])
-            if sh:
-                set_text(sh, val)
-                hits += 1
+        left = TABLE_LEFT + sum(COL_WIDTHS[:ci])
+        align = PP_ALIGN.LEFT if ci == 0 else PP_ALIGN.CENTER
+        add_text(left, tot_row_top, COL_WIDTHS[ci], ROW_HEIGHT, val,
+                 size=9, bold=True, color=TEXT_BLACK, align=align, bg_color=TOTAL_BG)
+        hits += 1
 
     return hits
 
