@@ -466,7 +466,10 @@ def _chart_slide(chart_name, preferred_slide=None):
         for sh in preferred_slide.shapes:
             if sh.name == chart_name and sh.has_chart:
                 return preferred_slide
-    # Fall back to global search
+        # If preferred slide doesn't have the chart, return NullSlide to avoid
+        # accidentally updating a chart on a different slide with the same name
+        return _NullSlide()
+    # Fall back to global search only when no preferred slide is specified
     found = _find_slide_with_chart(chart_name)
     if isinstance(found, _NullSlide) and preferred_slide is not None:
         return preferred_slide
@@ -1297,12 +1300,34 @@ for _sh in _SL_BUBBLE.shapes:
 if _iclub_chart is not None:
     _mga_chart_exists = any(sh.name == "C9041" for sh in _SL_BUBBLE.shapes)
     if not _mga_chart_exists:
+        _orig_part = _iclub_chart.chart.part
+        _slide_part = _SL_BUBBLE.part
+        _package = prs.part.package
+        _new_element = _copy_ic.deepcopy(_orig_part._element)
+        from pptx.opc.packuri import PackURI
+        from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+        _new_partname = PackURI('/ppt/charts/chart9041.xml')
+        _new_part = _orig_part.__class__(
+            partname=_new_partname,
+            content_type=_orig_part.content_type,
+            package=_package,
+            element=_new_element
+        )
+        _rId = _slide_part.relate_to(_new_part, RT.CHART)
+        _ns_r = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
         _new_chart_elem = _copy_ic.deepcopy(_iclub_chart._element)
+        for _c_chart in _new_chart_elem.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/chart}chart'):
+            _c_chart.set('{' + _ns_r + '}id', _rId)
         _SL_BUBBLE.shapes._spTree.append(_new_chart_elem)
-        _mga_chart = [sh for sh in _SL_BUBBLE.shapes if sh.name == "C9037" and sh not in [_iclub_chart]][0]
-        _mga_chart.name = "C9041"
-        _mga_chart.left = 9891308
-        _mga_chart.top = 5187864
+        _mga_chart = None
+        for _sh in _SL_BUBBLE.shapes:
+            if _sh.name == "C9037" and _sh is not _iclub_chart:
+                _mga_chart = _sh
+                break
+        if _mga_chart:
+            _mga_chart.name = "C9041"
+            _mga_chart.left = 9891308
+            _mga_chart.top = 5187864
 
         _iclub_title = None
         for _sh_t in _SL_BUBBLE.shapes:
@@ -1312,11 +1337,19 @@ if _iclub_chart is not None:
         if _iclub_title is not None:
             _new_title_elem = _copy_ic.deepcopy(_iclub_title._element)
             _SL_BUBBLE.shapes._spTree.append(_new_title_elem)
-            _new_title = [sh for sh in _SL_BUBBLE.shapes if sh.name == "s9036" and sh not in [_iclub_title]][0]
-            _new_title.name = "s9040"
-            _new_title.left = 9900448
-            _new_title.top = 5037054
-            _new_title.text_frame.text = "MGA业务"
+            _new_title = None
+            for _sh in _SL_BUBBLE.shapes:
+                if _sh.name == "s9036" and _sh is not _iclub_title:
+                    _new_title = _sh
+                    break
+            if _new_title:
+                _new_title.name = "s9040"
+                _new_title.left = 9900448
+                _new_title.top = 5037054
+                if _new_title.text_frame.paragraphs and _new_title.text_frame.paragraphs[0].runs:
+                    _new_title.text_frame.paragraphs[0].runs[0].text = "MGA业务"
+                else:
+                    _new_title.text_frame.text = "MGA业务"
 
 _I_CHART_MAP = [
     ("C9013", "天领业务"),
@@ -1483,8 +1516,19 @@ _G_SEGS = [
     ("成事家办",     "Shape 75", "Text 76"),
     ("合伙转介业务", "Shape 77", "Text 78"),
     ("IFA业务",      "Shape 79", "Text 80"),
-    ("MGA业务",      "Shape 81", "Shape 82"),
+    ("MGA业务",      "Shape 81", "Text 82"),
 ]
+_G_SEG_SHORT = {
+    "BK业务": "BK",
+    "永明经代": "永明经代",
+    "同行经代": "同行经代",
+    "天领业务": "天领",
+    "ICLUB业务": "ICLUB",
+    "成事家办": "成事家办",
+    "合伙转介业务": "合伙转介",
+    "IFA业务": "IFA",
+    "MGA业务": "MGA",
+}
 
 # G bubble chart + H waterfall: in full 11-slide deck these are on Slide 4 (slides[3]).
 # _SL_BUBBLE is found by "H  全业务目标缺口分解" text unique to this slide.
@@ -1504,6 +1548,15 @@ for seg, bubble_name, lbl_name in _G_SEGS:
     # If value <= 1.5, assume it's a fraction and convert to percent
     rate_pct = rate_raw * 100 if rate_raw <= 1.5 else rate_raw
     cnt      = int(num(r.get("批核件数", 0)))
+    
+    # FIX MGA: If target is 0, use issued APE as proxy for display
+    if tgt_m <= 0:
+        issued_m = to_m(r.get("2026批核APE", 0))
+        if issued_m > 0:
+            tgt_m = issued_m
+            rate_pct = 100.0
+        else:
+            tgt_m = 10
 
     cx = _g_cx(tgt_m); cy = _g_cy(rate_pct); sz = _g_sz(cnt)
 
@@ -1527,15 +1580,44 @@ for seg, bubble_name, lbl_name in _G_SEGS:
     # Previously labels used cx - sh.width//2 which was off by ~170K EMU causing drift.
     _LBL_OFFSET_X = -342900   # verified from PPT scan: label.left = bubble_cx - 342900
     _LBL_GAP_Y    =  15000    # small gap between bubble bottom and label top
+    
+    # Check if label shape exists, if not, clone from Text 80 (IFA label)
+    _lbl_shape = None
     for sh in _slide4.shapes:
         if sh.name == lbl_name and sh.has_text_frame:
-            lbl_top = cy + sz // 2 + _LBL_GAP_Y
-            if lbl_top + (sh.height or 164592) > _G_PLOT_BOTTOM + 50000:
-                lbl_top = cy - sz // 2 - (sh.height or 164592) - _LBL_GAP_Y
-            sh.left = cx + _LBL_OFFSET_X
-            sh.top  = lbl_top
-            sh.text_frame.text = seg
+            _lbl_shape = sh
             break
+    if _lbl_shape is None and lbl_name == "Text 82":
+        for _ref_sh in _slide4.shapes:
+            if _ref_sh.name == "Text 80" and _ref_sh.has_text_frame:
+                import copy as _copy_g
+                _new_lbl_elem = _copy_g.deepcopy(_ref_sh._element)
+                _slide4.shapes._spTree.append(_new_lbl_elem)
+                _lbl_shape = [sh for sh in _slide4.shapes if sh.name == "Text 80" and sh not in [_ref_sh]][0]
+                _lbl_shape.name = "Text 82"
+                break
+    
+    if _lbl_shape is not None:
+        lbl_top = cy + sz // 2 + _LBL_GAP_Y
+        if lbl_top + (_lbl_shape.height or 164592) > _G_PLOT_BOTTOM + 50000:
+            lbl_top = cy - sz // 2 - (_lbl_shape.height or 164592) - _LBL_GAP_Y
+        _lbl_shape.left = cx + _LBL_OFFSET_X
+        _lbl_shape.top  = lbl_top
+        _seg_short = _G_SEG_SHORT.get(seg, seg)
+        if _lbl_shape.text_frame.paragraphs and _lbl_shape.text_frame.paragraphs[0].runs:
+            p = _lbl_shape.text_frame.paragraphs[0]
+            font = p.runs[0].font
+            font_bold = font.bold
+            font_size = font.size
+            font_name = font.name
+            _lbl_shape.text_frame.text = _seg_short
+            if _lbl_shape.text_frame.paragraphs and _lbl_shape.text_frame.paragraphs[0].runs:
+                new_font = _lbl_shape.text_frame.paragraphs[0].runs[0].font
+                new_font.bold = font_bold
+                new_font.size = font_size
+                new_font.name = font_name
+        else:
+            _lbl_shape.text_frame.text = _seg_short
 
 # ── Slide 4 H: Waterfall — 柱形高度/位置/标签全部重算，标签统一在柱上方 ─
 # Coordinate system:
@@ -1584,6 +1666,30 @@ if len(_s315) == 4:
         _new_text314 = [sh for sh in _slide4.shapes if sh.name=="Text_314" and sh not in _text314_list][0]
         _new_text314.left = _last_text314.left + 289560
         _new_text314.top = _last_text314.top
+
+import copy as _copy_wf
+_name_labels = sorted([sh for sh in _slide4.shapes if sh.name.startswith("Text_") and sh.has_text_frame], key=lambda s:s.left)
+_mga_label_exists = any("MGA" in sh.text_frame.text for sh in _name_labels if sh.has_text_frame)
+if not _mga_label_exists:
+    _last_name_label = None
+    for _lbl_name in ["天领", "ICLUB", "成事", "合伙"]:
+        for sh in _slide4.shapes:
+            if sh.has_text_frame and _lbl_name in sh.text_frame.text:
+                _last_name_label = sh
+                break
+        if _last_name_label:
+            break
+    if _last_name_label:
+        _new_name_label_elem = _copy_wf.deepcopy(_last_name_label._element)
+        _slide4.shapes._spTree.append(_new_name_label_elem)
+        _new_name_label = [sh for sh in _slide4.shapes if sh not in _name_labels][0]
+        _new_name_label.left = _last_name_label.left + 289560
+        _new_name_label.top = _last_name_label.top
+        if _new_name_label.text_frame.paragraphs and _new_name_label.text_frame.paragraphs[0].runs:
+            _new_name_label.text_frame.paragraphs[0].runs[0].text = "MGA"
+        else:
+            _new_name_label.text_frame.text = "MGA"
+        print(f"  [H] Added MGA name label at left={_new_name_label.left}")
 
 # Bar table: (shape_name_or_None, s315_idx, val_m, lbl_name, lbl_left)
 _WF_BAR_TABLE = [
@@ -2824,105 +2930,152 @@ apply_substitutions(_SL_BUBBLE,   SLIDE4_SUBS, "Slide 4")   # G气泡+H瀑布
 apply_substitutions(slides[4], SLIDE5_SUBS, "Slide 5")
 
 # ── Add MGA业务 to Slide 5 J section (保单阶段构成) ─────────────────────────
-# Template doesn't have MGA placeholder, so we add it dynamically
+# Template doesn't have MGA placeholder, so we add it dynamically and rearrange all 9 business lines
 from pptx.util import Pt
 from pptx.enum.text import PP_ALIGN
 
 def _add_mga_to_slide5():
     slide = slides[4]
+    
     _mga_ch_exists = any(sh.name == "Text_MGA" for sh in slide.shapes)
     if _mga_ch_exists:
         print("  [MGA] already exists on Slide 5, skip")
         return
     
-    mga_top = Emu(5400000)
+    biz_order = [
+        ("IFA业务", CH_IFA),
+        ("ICLUB", CH_ICLUB),
+        ("同行经代", CH_THJD),
+        ("成事家办", CH_CSJB),
+        ("合伙转介", CH_HHZJ),
+        ("BK业务", CH_BK),
+        ("天领业务", CH_TL),
+        ("MGA业务", CH_MGA),
+        ("永明经代", CH_YMJD),
+    ]
+    
+    pct_map = {
+        "BK业务": (_bk_is, _bk_un),
+        "永明经代": (_ym_is, _ym_un),
+        "同行经代": (_th_is, _th_un),
+        "天领业务": (_tl_is, _tl_un),
+        "ICLUB": (_ic_is, _ic_un),
+        "成事家办": (_cs_is, _cs_un),
+        "合伙转介": (_hh_is, _hh_un),
+        "IFA业务": (0, 0),
+        "MGA业务": (_mg_is, _mg_un),
+    }
+    
+    section_start = Emu(1350000)
+    section_end = Emu(5800000)
+    total_height = section_end - section_start
+    line_height = total_height // 9
+    
     name_left = Emu(299720)
     name_width = Emu(1243584)
-    name_height = Emu(182880)
-    total_left = Emu(299720)
-    total_top_offset = Emu(182880)
+    name_height = Emu(150000)
     pct1_left = Emu(1616456)
     pct2_left = Emu(2653916)
     stack_left = Emu(3198368)
-    stack_top_offset = Emu(64008)
+    stack_height = Emu(150000)
+    total_top_offset = Emu(150000)
     
-    tb_name = slide.shapes.add_textbox(name_left, mga_top, name_width, name_height)
-    tf_name = tb_name.text_frame
-    tf_name.margin_left = tf_name.margin_right = tf_name.margin_top = tf_name.margin_bottom = Emu(0)
-    tf_name.word_wrap = False
-    para = tf_name.paragraphs[0]
-    para.alignment = PP_ALIGN.LEFT
-    run = para.add_run()
-    run.text = "MGA业务"
-    run.font.size = Pt(11)
-    run.font.bold = True
-    run.font.color.rgb = RGBColor(0x20, 0x20, 0x20)
-    run.font.name = 'Calibri'
-    tb_name.name = "Text_MGA"
+    for idx, (biz_name, ch_data) in enumerate(biz_order):
+        line_top = section_start + idx * line_height
+        
+        if biz_name in ["IFA业务", "ICLUB", "同行经代", "成事家办", "合伙转介", "BK业务", "天领业务", "永明经代"]:
+            for s in slide.shapes:
+                if s.has_text_frame and s.name.startswith('Text'):
+                    text = s.text_frame.text.strip()
+                    if text == biz_name:
+                        s.top = line_top
+                        s.height = name_height
+                    elif text.startswith('合计') and s.top >= line_top and s.top < line_top + line_height:
+                        s.top = line_top + total_top_offset
+                        s.height = name_height
+                    elif '▌' in text and s.top >= line_top and s.top < line_top + line_height:
+                        s.top = line_top + Emu(30000)
+                        s.height = stack_height
+                    elif '%' in text and len(text) <= 5 and s.top >= line_top and s.top < line_top + line_height:
+                        s.top = line_top + Emu(30000) + Emu(9144)
+                        s.height = Emu(140000)
+        
+        if biz_name == "MGA业务":
+            tb_name = slide.shapes.add_textbox(name_left, line_top, name_width, name_height)
+            tf_name = tb_name.text_frame
+            tf_name.margin_left = tf_name.margin_right = tf_name.margin_top = tf_name.margin_bottom = Emu(0)
+            tf_name.word_wrap = False
+            para = tf_name.paragraphs[0]
+            para.alignment = PP_ALIGN.LEFT
+            run = para.add_run()
+            run.text = "MGA业务"
+            run.font.size = Pt(10)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(0x20, 0x20, 0x20)
+            run.font.name = 'Calibri'
+            tb_name.name = "Text_MGA"
+            
+            total_text = f"合计 {ch_data['total_m']:.1f}M"
+            tb_total = slide.shapes.add_textbox(name_left, line_top + total_top_offset, name_width, name_height)
+            tf_total = tb_total.text_frame
+            tf_total.margin_left = tf_total.margin_right = tf_total.margin_top = tf_total.margin_bottom = Emu(0)
+            tf_total.word_wrap = False
+            para = tf_total.paragraphs[0]
+            para.alignment = PP_ALIGN.LEFT
+            run = para.add_run()
+            run.text = total_text
+            run.font.size = Pt(10)
+            run.font.bold = False
+            run.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+            run.font.name = 'Calibri'
+            tb_total.name = "Text_MGA_total"
+            
+            pct_issued, pct_unbat = pct_map[biz_name]
+            
+            tb_pct1 = slide.shapes.add_textbox(pct1_left, line_top + Emu(30000) + Emu(9144), Emu(500000), Emu(140000))
+            tf_pct1 = tb_pct1.text_frame
+            tf_pct1.margin_left = tf_pct1.margin_right = tf_pct1.margin_top = tf_pct1.margin_bottom = Emu(0)
+            tf_pct1.word_wrap = False
+            para = tf_pct1.paragraphs[0]
+            para.alignment = PP_ALIGN.CENTER
+            run = para.add_run()
+            run.text = f"{pct_issued}%"
+            run.font.size = Pt(10)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(0x1A, 0x6B, 0x3A)
+            run.font.name = 'Calibri'
+            tb_pct1.name = "Text_MGA_pct1"
+            
+            tb_pct2 = slide.shapes.add_textbox(pct2_left, line_top + Emu(30000) + Emu(9144), Emu(500000), Emu(140000))
+            tf_pct2 = tb_pct2.text_frame
+            tf_pct2.margin_left = tf_pct2.margin_right = tf_pct2.margin_top = tf_pct2.margin_bottom = Emu(0)
+            tf_pct2.word_wrap = False
+            para = tf_pct2.paragraphs[0]
+            para.alignment = PP_ALIGN.CENTER
+            run = para.add_run()
+            run.text = f"{pct_unbat}%"
+            run.font.size = Pt(10)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(0xC8, 0x89, 0x0A)
+            run.font.name = 'Calibri'
+            tb_pct2.name = "Text_MGA_pct2"
+            
+            stack_text = _stack_label(ch_data)
+            tb_stack = slide.shapes.add_textbox(stack_left, line_top + Emu(30000), Emu(1500000), stack_height)
+            tf_stack = tb_stack.text_frame
+            tf_stack.margin_left = tf_stack.margin_right = tf_stack.margin_top = tf_stack.margin_bottom = Emu(0)
+            tf_stack.word_wrap = False
+            para = tf_stack.paragraphs[0]
+            para.alignment = PP_ALIGN.LEFT
+            run = para.add_run()
+            run.text = stack_text
+            run.font.size = Pt(10)
+            run.font.bold = False
+            run.font.color.rgb = RGBColor(0x20, 0x20, 0x20)
+            run.font.name = 'Calibri'
+            tb_stack.name = "Text_MGA_stack"
     
-    total_text = f"合计 {CH_MGA['total_m']:.1f}M"
-    tb_total = slide.shapes.add_textbox(total_left, mga_top + total_top_offset, name_width, name_height)
-    tf_total = tb_total.text_frame
-    tf_total.margin_left = tf_total.margin_right = tf_total.margin_top = tf_total.margin_bottom = Emu(0)
-    tf_total.word_wrap = False
-    para = tf_total.paragraphs[0]
-    para.alignment = PP_ALIGN.LEFT
-    run = para.add_run()
-    run.text = total_text
-    run.font.size = Pt(11)
-    run.font.bold = False
-    run.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
-    run.font.name = 'Calibri'
-    tb_total.name = "Text_MGA_total"
-    
-    pct_issued = _mg_is
-    pct_unbat = _mg_un
-    pct_pend = 100 - pct_issued - pct_unbat
-    
-    tb_pct1 = slide.shapes.add_textbox(pct1_left, mga_top + stack_top_offset + Emu(9144), Emu(600000), Emu(165600))
-    tf_pct1 = tb_pct1.text_frame
-    tf_pct1.margin_left = tf_pct1.margin_right = tf_pct1.margin_top = tf_pct1.margin_bottom = Emu(0)
-    tf_pct1.word_wrap = False
-    para = tf_pct1.paragraphs[0]
-    para.alignment = PP_ALIGN.CENTER
-    run = para.add_run()
-    run.text = f"{pct_issued}%"
-    run.font.size = Pt(11)
-    run.font.bold = True
-    run.font.color.rgb = RGBColor(0x1A, 0x6B, 0x3A)
-    run.font.name = 'Calibri'
-    tb_pct1.name = "Text_MGA_pct1"
-    
-    tb_pct2 = slide.shapes.add_textbox(pct2_left, mga_top + stack_top_offset + Emu(9144), Emu(600000), Emu(165600))
-    tf_pct2 = tb_pct2.text_frame
-    tf_pct2.margin_left = tf_pct2.margin_right = tf_pct2.margin_top = tf_pct2.margin_bottom = Emu(0)
-    tf_pct2.word_wrap = False
-    para = tf_pct2.paragraphs[0]
-    para.alignment = PP_ALIGN.CENTER
-    run = para.add_run()
-    run.text = f"{pct_unbat}%"
-    run.font.size = Pt(11)
-    run.font.bold = True
-    run.font.color.rgb = RGBColor(0xC8, 0x89, 0x0A)
-    run.font.name = 'Calibri'
-    tb_pct2.name = "Text_MGA_pct2"
-    
-    stack_text = _stack_label(CH_MGA)
-    tb_stack = slide.shapes.add_textbox(stack_left, mga_top + stack_top_offset, Emu(1500000), Emu(182880))
-    tf_stack = tb_stack.text_frame
-    tf_stack.margin_left = tf_stack.margin_right = tf_stack.margin_top = tf_stack.margin_bottom = Emu(0)
-    tf_stack.word_wrap = False
-    para = tf_stack.paragraphs[0]
-    para.alignment = PP_ALIGN.LEFT
-    run = para.add_run()
-    run.text = stack_text
-    run.font.size = Pt(11)
-    run.font.bold = False
-    run.font.color.rgb = RGBColor(0x20, 0x20, 0x20)
-    run.font.name = 'Calibri'
-    tb_stack.name = "Text_MGA_stack"
-    
-    print(f"  [MGA] added to Slide 5 J section: {stack_text}, {total_text}, {pct_issued}%/{pct_unbat}%")
+    print(f"  [MGA] added to Slide 5 J section and all 9 business lines rearranged")
 
 _add_mga_to_slide5()
 

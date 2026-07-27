@@ -190,7 +190,7 @@ def load_csv(path):
 
     biz_map={'天领业务':'代理人业务','成事家办':'代理人业务','BK业务':'经代业务',
              '同行经代':'经代业务','永明经代':'经代业务','合伙转介业务':'KA业务',
-             'ICLUB业务':'KA业务','IFA业务':'KA业务'}
+             'ICLUB业务':'KA业务','IFA业务':'KA业务','MGA业务':'MGA业务'}
     df['biz_cat'] = df['segment'].map(biz_map).fillna(df.get('biz_type',''))
 
     def term_cat(t):
@@ -591,7 +591,7 @@ def build_all_sheets(df, months_26, weeks_26, issue_months, pending_months, lice
         c=ws.cell(row=r,column=j+1); c.value=txt; st_hdr(c)
     r+=1
     # FIX1: use biz_cat (segment-derived) not biz_type (CSV field, may have NaN)
-    biz_types=[('代理人业务',df['biz_cat']=='代理人业务'),('经代业务',df['biz_cat']=='经代业务'),('KA业务',df['biz_cat']=='KA业务')]
+    biz_types=[('代理人业务',df['biz_cat']=='代理人业务'),('经代业务',df['biz_cat']=='经代业务'),('KA业务',df['biz_cat']=='KA业务'),('MGA业务',df['biz_cat']=='MGA业务')]
     row_sums = {'a26':0,'c26':0,'ap':0,'cp':0,'aw':0,'cw':0}
     for i,(bt,bm) in enumerate(biz_types):
         a2026=df[mask_eff2026&bm]['ape'].sum(); c2026=df[mask_eff2026&bm].shape[0]
@@ -2678,7 +2678,7 @@ def build_csv_s1(df, months_26, issue_months):
     # ── G. 业务类型维度 ────────────────────────────────────────
     rows=[['业务类型','2026批核APE','批核件数','未批核APE','未批核件数','待签APE','待签件数','合计APE','合计件数']]
     gs={'a26':0,'c26':0,'ap':0,'cp':0,'aw':0,'cw':0}
-    for bt in ['代理人业务','经代业务','KA业务']:
+    for bt in ['代理人业务','经代业务','KA业务','MGA业务']:
         bm=df['biz_cat']==bt
         a26=df[m26&bm]['ape'].sum(); c26=df[m26&bm].shape[0]
         ap=df[mpd&bm]['ape'].sum(); cp=df[mpd&bm].shape[0]
