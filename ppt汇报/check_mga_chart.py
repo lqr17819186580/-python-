@@ -1,7 +1,7 @@
 import pptx
 from chart_xml_patch import _find_series
 
-prs = pptx.Presentation('周业绩汇报PPT_AUTO_UPDATED.pptx')
+prs = pptx.Presentation('周业绩汇报PPT_FINAL.pptx')
 slide = prs.slides[0]
 
 for shape in slide.shapes:

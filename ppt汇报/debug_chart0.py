@@ -1,6 +1,6 @@
 import pptx
 
-prs = pptx.Presentation('周业绩汇报PPT_AUTO_UPDATED.pptx')
+prs = pptx.Presentation('周业绩汇报PPT_FINAL.pptx')
 slide = prs.slides[0]
 
 for shape in slide.shapes:

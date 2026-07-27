@@ -910,8 +910,8 @@ def build_all_sheets(df, months_26, weeks_26, issue_months, pending_months, lice
         c=ws2.cell(row=r,column=j+1); c.value=h; st_hdr(c)
     r+=1
     # build sorted by 2026 batch ape
-    th_ka_sorted = df[mask_eff2026 & (df['segment'].isin(['永明经代','同行经代']))].groupby('ka')['ape'].sum().sort_values(ascending=False).index.tolist()
-    th_ka_extra = [k for k in df[(df['segment'].isin(['永明经代','同行经代'])) & (mask_pending | mask_waiting)]['ka'].unique() if k not in th_ka_sorted]
+    th_ka_sorted = df[mask_eff2026 & (df['segment'].isin(['永明经代','同行经代','MGA业务']))].groupby('ka')['ape'].sum().sort_values(ascending=False).index.tolist()
+    th_ka_extra = [k for k in df[(df['segment'].isin(['永明经代','同行经代','MGA业务'])) & (mask_pending | mask_waiting)]['ka'].unique() if k not in th_ka_sorted]
     th_ka_all = th_ka_sorted + th_ka_extra
 
     th_tot = [0]*8
@@ -998,18 +998,18 @@ def build_all_sheets(df, months_26, weeks_26, issue_months, pending_months, lice
         r+=2
         return r
 
-    th_kas_full = df[df['segment'].isin(['永明经代','同行经代'])]['ka'].unique().tolist()
+    th_kas_full = df[df['segment'].isin(['永明经代','同行经代','MGA业务'])]['ka'].unique().tolist()
 
     # Pre-compute sorted order: total APE (批核+未批核+待签) descending
-    mask_th_all = (mask_eff2026 | mask_pending | mask_waiting) & df['segment'].isin(['永明经代','同行经代'])
+    mask_th_all = (mask_eff2026 | mask_pending | mask_waiting) & df['segment'].isin(['永明经代','同行经代','MGA业务'])
     th_ka_order = df[mask_th_all].groupby('ka')['ape'].sum().sort_values(ascending=False).index.tolist()
 
-    r, th_order_L = write_monthly_ka(ws2, r, 'L-APE. 月度预约业绩—同行 (APE)', '📌 res_ym；排除流失类；⭐ 按该表自身合计APE降序', 'res_ym', mask_c & (df['segment'].isin(['永明经代','同行经代'])), th_ka_order)
-    r = write_monthly_ka_cnt(ws2, r, 'L-件数. 月度预约业绩—同行 (件数)', '📌 同L-APE；行顺序跟随APE子表', 'res_ym', mask_c & (df['segment'].isin(['永明经代','同行经代'])), th_order_L)
-    r, th_order_M = write_monthly_ka(ws2, r, 'M-APE. 月度签单业绩—同行 (APE)', '📌 sign_ym；排除排期及流失；⭐ 按该表自身合计APE降序', 'sign_ym', mask_d2 & (df['segment'].isin(['永明经代','同行经代'])), th_ka_order)
-    r = write_monthly_ka_cnt(ws2, r, 'M-件数. 月度签单业绩—同行 (件数)', '📌 同M-APE；行顺序跟随APE子表', 'sign_ym', mask_d2 & (df['segment'].isin(['永明经代','同行经代'])), th_order_M)
-    r, th_order_N = write_monthly_ka(ws2, r, 'N-APE. 月度批核业绩—同行 (APE)', '📌 issue_ym；仅生效；⭐ 按该表自身合计APE降序', 'issue_ym', mask_e2 & (df['segment'].isin(['永明经代','同行经代'])), th_ka_order)
-    r = write_monthly_ka_cnt(ws2, r, 'N-件数. 月度批核业绩—同行 (件数)', '📌 同N-APE；行顺序跟随APE子表', 'issue_ym', mask_e2 & (df['segment'].isin(['永明经代','同行经代'])), th_order_N)
+    r, th_order_L = write_monthly_ka(ws2, r, 'L-APE. 月度预约业绩—同行 (APE)', '📌 res_ym；排除流失类；⭐ 按该表自身合计APE降序', 'res_ym', mask_c & (df['segment'].isin(['永明经代','同行经代','MGA业务'])), th_ka_order)
+    r = write_monthly_ka_cnt(ws2, r, 'L-件数. 月度预约业绩—同行 (件数)', '📌 同L-APE；行顺序跟随APE子表', 'res_ym', mask_c & (df['segment'].isin(['永明经代','同行经代','MGA业务'])), th_order_L)
+    r, th_order_M = write_monthly_ka(ws2, r, 'M-APE. 月度签单业绩—同行 (APE)', '📌 sign_ym；排除排期及流失；⭐ 按该表自身合计APE降序', 'sign_ym', mask_d2 & (df['segment'].isin(['永明经代','同行经代','MGA业务'])), th_ka_order)
+    r = write_monthly_ka_cnt(ws2, r, 'M-件数. 月度签单业绩—同行 (件数)', '📌 同M-APE；行顺序跟随APE子表', 'sign_ym', mask_d2 & (df['segment'].isin(['永明经代','同行经代','MGA业务'])), th_order_M)
+    r, th_order_N = write_monthly_ka(ws2, r, 'N-APE. 月度批核业绩—同行 (APE)', '📌 issue_ym；仅生效；⭐ 按该表自身合计APE降序', 'issue_ym', mask_e2 & (df['segment'].isin(['永明经代','同行经代','MGA业务'])), th_ka_order)
+    r = write_monthly_ka_cnt(ws2, r, 'N-件数. 月度批核业绩—同行 (件数)', '📌 同N-APE；行顺序跟随APE子表', 'issue_ym', mask_e2 & (df['segment'].isin(['永明经代','同行经代','MGA业务'])), th_order_N)
 
     # ============================================================
     # S2: O. 银行业绩分析 + P/Q/R 月度 + S/T 分行
@@ -1444,8 +1444,8 @@ def build_all_sheets(df, months_26, weeks_26, issue_months, pending_months, lice
         r+=2
         return r
 
-    th_kas_s3 = df[df['segment'].isin(['永明经代','同行经代'])]['ka'].unique().tolist()
-    mask_th = df['segment'].isin(['永明经代','同行经代'])
+    th_kas_s3 = df[df['segment'].isin(['永明经代','同行经代','MGA业务'])]['ka'].unique().tolist()
+    mask_th = df['segment'].isin(['永明经代','同行经代','MGA业务'])
 
     # Pre-compute sorted order by total APE for S3 tonghang
     mask_th_all_s3 = (mask_eff2026 | mask_pending | mask_waiting) & mask_th
@@ -3120,7 +3120,7 @@ def build_csv_s3(df, weeks_26, pending_months):
     # J-L 同行周度 / M-O 银行周度 — 预聚合ka×week
     fld_kaw='KEY ACCOUNT  /  '+'  /  '.join(weeks_26)+'  /  合计'
     for grp_name,seg_f,codes2 in [
-        ('同行',df['segment'].isin(['永明经代','同行经代']),
+        ('同行',df['segment'].isin(['永明经代','同行经代','MGA业务']),
          [('J','预约','res_yw',mask_c),('K','签单','sign_yw',mask_d),('L','批核','issue_yw',mask_e)]),
         ('银行',df['segment']=='BK业务',
          [('M','预约','res_yw',mask_c),('N','签单','sign_yw',mask_d),('O','批核','issue_yw',mask_e)]),

@@ -24,8 +24,8 @@ from apply_w14_patches import load_rows, parse_section_weekly_all, CFG as W14_CF
 from sowhat_slots import find_sowhat_slots
 import sowhat_generators as SW_GEN
 
-IN_PPT  = "周业绩汇报PPT_AUTO_UPDATED.pptx"
-OUT_PPT = "周业绩汇报PPT_FINAL_MGA.pptx"
+IN_PPT  = "周业绩汇报PPT_AUTO_UPDATED_updated.pptx"
+OUT_PPT = "周业绩汇报PPT_FINAL.pptx"
 
 
 # ---------------------------------------------------------------------------

@@ -21,11 +21,11 @@ def inspect_chart(prs, slide_idx, chart_name, label):
             return
 
 print("=== Before update_ppt.py ===")
-prs = pptx.Presentation('周业绩汇报PPT_FINAL.pptx')
+prs = pptx.Presentation('template.pptx')
 inspect_chart(prs, 0, "Chart 0", "Before update")
 
 import update_ppt
 
 print("\n=== After update_ppt.py ===")
-prs2 = pptx.Presentation('周业绩汇报PPT_AUTO_UPDATED.pptx')
+prs2 = pptx.Presentation('周业绩汇报PPT_FINAL.pptx')
 inspect_chart(prs2, 0, "Chart 0", "After update")
