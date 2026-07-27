@@ -829,11 +829,11 @@ def update_t_table(slide, S3):
         run.font.name = 'Calibri'
         return tb
 
-    # Remove ALL existing shapes in the T-table area
+    # Remove ALL existing shapes in the T-table area (including any duplicate/bottom tables)
     removed = 0
     for sh in list(slide.shapes):
         if sh.has_text_frame and sh.top is not None and sh.left is not None:
-            if TABLE_TOP - Emu(10000) < sh.top < TABLE_TOP + TABLE_HEIGHT + Emu(10000):
+            if TABLE_TOP - Emu(10000) < sh.top < Emu(7500000):
                 if TABLE_LEFT - Emu(10000) < sh.left < TABLE_LEFT + TABLE_WIDTH + Emu(10000):
                     sh._element.getparent().remove(sh._element)
                     removed += 1

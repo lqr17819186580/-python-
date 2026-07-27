@@ -3010,6 +3010,8 @@ def _add_mga_to_slide5():
             
             for s in slide.shapes:
                 if s.name in all_shape_names:
+                    if s.name == "Text 29" and s.left > 4000000:
+                        continue
                     if s.name == info["name_shape"]:
                         s.top = line_top
                         s.height = name_height
