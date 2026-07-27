@@ -1691,6 +1691,30 @@ if not _mga_label_exists:
             _new_name_label.text_frame.text = "MGA"
         print(f"  [H] Added MGA name label at left={_new_name_label.left}")
 
+_wf_bottom_labels = [sh for sh in _slide4.shapes if sh.has_text_frame and 5660000 <= sh.top <= 5675000]
+_wf_mga_bottom_label_exists = any("MGA" in ''.join(r.text for p in sh.text_frame.paragraphs for r in p.runs) for sh in _wf_bottom_labels)
+if not _wf_mga_bottom_label_exists:
+    _last_wf_label = None
+    for _lbl_name in ["合伙转介批核", "成事家办批核", "ICLUB批核", "天领业务批核"]:
+        for sh in _wf_bottom_labels:
+            text = ''.join(r.text for p in sh.text_frame.paragraphs for r in p.runs)
+            if _lbl_name in text:
+                _last_wf_label = sh
+                break
+        if _last_wf_label:
+            break
+    if _last_wf_label:
+        _new_wf_label_elem = _copy_wf.deepcopy(_last_wf_label._element)
+        _slide4.shapes._spTree.append(_new_wf_label_elem)
+        _new_wf_label = [sh for sh in _slide4.shapes if sh not in _wf_bottom_labels][0]
+        _new_wf_label.left = 6626860
+        _new_wf_label.top = _last_wf_label.top
+        if _new_wf_label.text_frame.paragraphs and _new_wf_label.text_frame.paragraphs[0].runs:
+            _new_wf_label.text_frame.paragraphs[0].runs[0].text = "MGA批核"
+        else:
+            _new_wf_label.text_frame.text = "MGA批核"
+        print(f"  [H] Added MGA bottom label at left={_new_wf_label.left}")
+
 # Bar table: (shape_name_or_None, s315_idx, val_m, lbl_name, lbl_left)
 _WF_BAR_TABLE = [
     ("Shape 102",  None, _wv_bk,  "Text 103", 4480433),   # BK

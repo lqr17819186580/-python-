@@ -25,7 +25,7 @@ from sowhat_slots import find_sowhat_slots
 import sowhat_generators as SW_GEN
 
 IN_PPT  = "周业绩汇报PPT_AUTO_UPDATED.pptx"
-OUT_PPT = "周业绩汇报PPT_FINAL.pptx"
+OUT_PPT = "周业绩汇报PPT_FINAL_MGA.pptx"
 
 
 # ---------------------------------------------------------------------------
@@ -830,13 +830,27 @@ def update_t_table(slide, S3):
         return tb
 
     # Remove ALL existing shapes in the T-table area (including any duplicate/bottom tables)
+    # Delete EVERYTHING in a very wide range to ensure ALL old table headers and data are removed
     removed = 0
+    
+    # First pass: delete all shapes in the T-table region
     for sh in list(slide.shapes):
-        if sh.has_text_frame and sh.top is not None and sh.left is not None:
-            if TABLE_TOP - Emu(10000) < sh.top < Emu(7500000):
-                if TABLE_LEFT - Emu(10000) < sh.left < TABLE_LEFT + TABLE_WIDTH + Emu(10000):
+        if sh.top is not None and sh.left is not None:
+            if sh.top >= Emu(3000000) and sh.top < Emu(9500000):
+                if sh.left >= Emu(5000000) and sh.left < Emu(13500000):
                     sh._element.getparent().remove(sh._element)
                     removed += 1
+    
+    # Second pass: delete any remaining header-like shapes (regardless of position)
+    header_texts = ['业务线', '件数', '件均APE', '平均时效', 'P90', '中位时效', '最大时效']
+    for sh in list(slide.shapes):
+        if sh.has_text_frame:
+            text = sh.text_frame.text.strip()
+            if any(ht in text for ht in header_texts):
+                if sh.left is not None and sh.left >= Emu(5000000):
+                    sh._element.getparent().remove(sh._element)
+                    removed += 1
+    
     print(f"  removed {removed} old T-table shapes")
 
     # Find the business line with the MAX average TAT (for red highlight)

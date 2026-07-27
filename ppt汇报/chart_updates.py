@@ -250,7 +250,7 @@ def slide6_weekly_trend(S3):
 # --------------------------------------------------------------------------
 
 def slide8_referrer(S2):
-    """U. 同行推荐人分析. Units: 万 (per original chart)."""
+    """U. 同行推荐人分析. Units: M (per original chart)."""
     j = S2["J"]
     j = j[j.iloc[:, 0] != "合计"]
     # sort by 2026批核APE desc
@@ -260,9 +260,9 @@ def slide8_referrer(S2):
     cats = j.iloc[:, 0].tolist()
     cd = CategoryChartData()
     cd.categories = cats
-    cd.add_series("批核APE(万)",   [to_w(v) for v in j["2026批核APE"]])
-    cd.add_series("未批核APE(万)", [to_w(v) for v in j["未批核APE"]])
-    cd.add_series("待签APE(万)",   [to_w(v) for v in j["待签APE"]])
+    cd.add_series("批核APE(M)",   [to_m(v) for v in j["2026批核APE"]])
+    cd.add_series("未批核APE(M)", [to_m(v) for v in j["未批核APE"]])
+    cd.add_series("待签APE(M)",   [to_m(v) for v in j["待签APE"]])
     return cd
 
 
@@ -275,9 +275,9 @@ def slide8_top10_ka(S2):
     cats = k.iloc[:, 0].tolist()
     cd = CategoryChartData()
     cd.categories = cats
-    cd.add_series("批核APE(万)",   [to_w(v) for v in k["2026批核APE"]])
-    cd.add_series("未批核APE(万)", [to_w(v) for v in k["未批核APE"]])
-    cd.add_series("待签APE(万)",   [to_w(v) for v in k["待签APE"]])
+    cd.add_series("批核APE(M)",   [to_m(v) for v in k["2026批核APE"]])
+    cd.add_series("未批核APE(M)", [to_m(v) for v in k["未批核APE"]])
+    cd.add_series("待签APE(M)",   [to_m(v) for v in k["待签APE"]])
     return cd
 
 
