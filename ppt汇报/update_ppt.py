@@ -1769,6 +1769,35 @@ for sh_name, s315_idx, val_m, lbl_name, lbl_left in _WF_BAR_TABLE:
     seg_name = {None: sh_name, 0:'天领', 1:'ICLUB', 2:'成事', 3:'合伙', 4:'MGA'}.get(s315_idx, sh_name)
     print(f"  [H] {str(seg_name):10s} {val_m:7.1f}M top={bar_top} h={bar_h} lbl={lbl_txt!r} {'✓' if bar_ok else '(lbl only)'}")
 
+# ── Remove extra white text boxes on Slide 4 ──────────────────────────────
+# The "MGA批核" label was added as a copy of existing labels, inheriting white
+# background + border. Remove it to avoid duplicate white text boxes.
+print("\n[Slide 4] Cleaning up extra white text boxes...")
+_removed_extra = 0
+for _sh in list(_slide4.shapes):
+    if not _sh.has_text_frame:
+        continue
+    _text = _sh.text_frame.text.strip()
+    # Remove "MGA批核" bottom label if it has white fill + border (inherited from template copy)
+    if _text == "MGA批核":
+        try:
+            if _sh.fill.type == 1:  # SOLID fill
+                try:
+                    _fill_rgb = _sh.fill.fore_color.rgb
+                    if _fill_rgb == RGBColor(0xFF, 0xFF, 0xFF):  # White fill
+                        _sh._element.getparent().remove(_sh._element)
+                        _removed_extra += 1
+                        print(f"  Removed white text box: {_text!r} at top={_sh.top}, left={_sh.left}")
+                        continue
+                except:
+                    pass
+        except:
+            pass
+if _removed_extra > 0:
+    print(f"  Cleaned up {_removed_extra} extra white text box(es)")
+else:
+    print("  No extra white text boxes found (already clean)")
+
 # ── Remaining chart replacements — names confirmed from xlsx embed log ────
 # All use preferred_slide to avoid name conflicts (Chart_YY/QD/PH/0/1 exist on
 # multiple slides; preferred_slide ensures we target the right one each time).
@@ -2407,6 +2436,9 @@ SLIDE2_SUBS = [
     # Also handle split-paragraph case
     ("84.8M/月（剩余 763M ÷ 9mo）",
      f"{PACE_LINE}M/月（剩余 {FULL_GAP_M:.0f}M ÷ {REMAINING_M}mo）"),
+    # Fix: 1–4 月已批核 → 1–6 月已批核
+    ("1–4 月已批核", "1–6 月已批核"),
+    ("1-4 月已批核", "1–6 月已批核"),
 ]
 
 # SLIDE 3 – Sunlife

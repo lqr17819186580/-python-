@@ -831,13 +831,53 @@ def update_t_table(slide, S3):
 
     # Remove ALL existing shapes in the T-table area (including any duplicate/bottom tables)
     # Delete EVERYTHING in a very wide range to ensure ALL old table headers and data are removed
+    # EXCEPT: preserve the T title text AND its dark background strip
     removed = 0
     
-    # First pass: delete all shapes in the T-table region
+    # T-title background strip: a dark purple rectangle (4A235A) behind the T title text
+    T_TITLE_BG_TOP = Emu(3657600)
+    T_TITLE_BG_LEFT = Emu(6163056)
+    T_TITLE_BG_W = Emu(5888736)
+    T_TITLE_BG_H = Emu(256032)
+    T_TITLE_BG_COLOR = RGBColor(0x4A, 0x23, 0x5A)
+    
+    def _is_t_title_bg(sh):
+        """Check if shape is the dark background strip behind T title."""
+        if sh.top is None or sh.left is None:
+            return False
+        # Position check: approximately match the known T-title bg strip
+        if abs(sh.top - T_TITLE_BG_TOP) > 50000:
+            return False
+        if abs(sh.left - T_TITLE_BG_LEFT) > 50000:
+            return False
+        if abs(sh.width - T_TITLE_BG_W) > 50000:
+            return False
+        if abs(sh.height - T_TITLE_BG_H) > 50000:
+            return False
+        # Color check: must be the dark purple
+        try:
+            if sh.fill.type == 1:
+                if sh.fill.fore_color.rgb == T_TITLE_BG_COLOR:
+                    return True
+        except:
+            pass
+        return False
+    
+    # First pass: delete all shapes in the T-table region (except T title + bg strip)
     for sh in list(slide.shapes):
         if sh.top is not None and sh.left is not None:
             if sh.top >= Emu(3000000) and sh.top < Emu(9500000):
                 if sh.left >= Emu(5000000) and sh.left < Emu(13500000):
+                    # Skip the T title text shape
+                    if sh.has_text_frame:
+                        text = sh.text_frame.text.strip()
+                        if "签批时效综合分析" in text or "T  签批" in text:
+                            print(f"  [T-title] Preserved title text: {text!r}")
+                            continue
+                    # Skip the T title background strip
+                    if _is_t_title_bg(sh):
+                        print(f"  [T-title] Preserved title bg strip (dark purple)")
+                        continue
                     sh._element.getparent().remove(sh._element)
                     removed += 1
     
@@ -846,12 +886,15 @@ def update_t_table(slide, S3):
     for sh in list(slide.shapes):
         if sh.has_text_frame:
             text = sh.text_frame.text.strip()
+            # Skip the T title shape
+            if "签批时效综合分析" in text or "T  签批" in text:
+                continue
             if any(ht in text for ht in header_texts):
                 if sh.left is not None and sh.left >= Emu(5000000):
                     sh._element.getparent().remove(sh._element)
                     removed += 1
     
-    print(f"  removed {removed} old T-table shapes")
+    print(f"  removed {removed} old T-table shapes (T title + bg strip preserved)")
 
     # Find the business line with the MAX average TAT (for red highlight)
     max_tat_biz = None
