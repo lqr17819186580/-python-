@@ -376,6 +376,118 @@ def patch_all_sowhat(prs, ctx):
     return hits, misses, orphans
 
 
+def _unify_sowhat_backgrounds(slide):
+    """Remove background from So What labels; keep light-blue bg on content."""
+    from lxml import etree
+    NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+    NS_P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+
+    TARGET_BG = RGBColor(0xEE, 0xF2, 0xFF)
+    TARGET_BORDER = RGBColor(0xC5, 0xCE, 0xE8)
+
+    count = 0
+    for sh in slide.shapes:
+        if not sh.has_text_frame or sh.top is None:
+            continue
+        t = sh.text_frame.text.strip()
+        if not t:
+            continue
+
+        in_band = False
+        for y0, y1 in SOWHAT_Y_BANDS:
+            if y0 <= sh.top <= y1:
+                in_band = True
+                break
+        if not in_band:
+            continue
+
+        if t.startswith('So What'):
+            spPr = sh._element.find('.//{%s}spPr' % NS_P)
+            if spPr is None:
+                spPr = sh._element.find('.//{%s}spPr' % NS_A)
+            if spPr is not None:
+                for tag in ('{%s}solidFill' % NS_A, '{%s}gradFill' % NS_A,
+                            '{%s}noFill' % NS_A, '{%s}blipFill' % NS_A,
+                            '{%s}pattFill' % NS_A, '{%s}ctrlFill' % NS_A):
+                    for el in spPr.findall(tag):
+                        spPr.remove(el)
+                noFill = etree.Element('{%s}noFill' % NS_A)
+                spPr.insert(0, noFill)
+            ln = sh._element.find('.//{%s}ln' % NS_A)
+            if ln is not None:
+                for tag in ('{%s}solidFill' % NS_A, '{%s}gradFill' % NS_A,
+                            '{%s}noFill' % NS_A, '{%s}blipFill' % NS_A):
+                    for el in ln.findall(tag):
+                        ln.remove(el)
+                ln_noFill = etree.Element('{%s}noFill' % NS_A)
+                ln.insert(0, ln_noFill)
+            sh.shadow.inherit = False
+            count += 1
+        elif len(t) > 40:
+            sh.fill.solid()
+            sh.fill.fore_color.rgb = TARGET_BG
+            sh.line.color.rgb = TARGET_BORDER
+            sh.line.width = Emu(3175)
+            sh.shadow.inherit = False
+            count += 1
+
+    print(f"  [SoWhat] Unified {count} So What shape backgrounds (labels no-fill)")
+    return count
+
+
+def _adjust_t_sowhat_position(slide):
+    """Move the T So What panel (right-bottom) down to avoid T table overlap.
+    
+    Shifts T So What shapes down by SHIFT EMU if they are at the original
+    positions (before adjustment). Idempotent: already-shifted shapes
+    are detected by their new position and not shifted again.
+    
+    S So What (left side, left~91440) stays at original position.
+    T So What (right side, left>3M, top>6M) is shifted down.
+    """
+    from lxml import etree
+    NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+    NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+    T_SOWHAT_LEFT_MIN = 3_000_000
+    T_SOWHAT_TOP_MIN = 6_000_000
+    SHIFT = Emu(200000)
+    POS_TOL = Emu(50000)
+
+    ORIGINAL_LABEL_TOP = 6291072
+    ORIGINAL_CONTENT_TOP = 6409944
+
+    count = 0
+    for sh in slide.shapes:
+        if sh.top is None or sh.left is None:
+            continue
+        t = sh.text_frame.text.strip() if sh.has_text_frame else ''
+
+        if sh.left < T_SOWHAT_LEFT_MIN:
+            continue
+        if sh.top < T_SOWHAT_TOP_MIN:
+            continue
+
+        is_label = t.startswith('So What')
+        is_content = len(t) > 40
+
+        if not is_label and not is_content:
+            continue
+
+        if is_label and abs(sh.top - ORIGINAL_LABEL_TOP) < POS_TOL:
+            sh.top = ORIGINAL_LABEL_TOP + SHIFT
+            count += 1
+            print(f"  [SoWhat] Shifted T-SoWhat label down to top={sh.top}")
+        elif is_content and abs(sh.top - ORIGINAL_CONTENT_TOP) < POS_TOL:
+            sh.top = ORIGINAL_CONTENT_TOP + SHIFT
+            count += 1
+            print(f"  [SoWhat] Shifted T-SoWhat content down to top={sh.top}")
+
+    if count > 0:
+        print(f"  [SoWhat] Adjusted {count} T So What shape positions")
+    return count
+
+
 def dedupe_t_table_ghosts(slide):
     """
     update_ppt.py's heatmatrix_cloner accidentally clones 8 cells from the
@@ -491,7 +603,7 @@ HEAT_TEXT_WHITE_THRESHOLD = 0.55
 # y=3197987 for Q/R so what, y=6291072 for S so what
 SOWHAT_Y_BANDS = [
     (3_100_000, 3_700_000),  # Q + R so what
-    (6_200_000, 6_800_000),  # S so what
+    (6_200_000, 7_000_000),  # S + T so what (expanded for downward shift)
 ]
 
 
@@ -776,8 +888,8 @@ def update_t_table(slide, S3):
             lookup[name] = row
 
     # Table dimensions
-    TABLE_LEFT = Emu(6327775)
-    TABLE_TOP = Emu(4224655)
+    TABLE_LEFT = Emu(6280000)
+    TABLE_TOP = Emu(3950000)
     COL_WIDTHS = [
         Emu(720000),   # 业务线
         Emu(630000),   # 件数
@@ -789,7 +901,7 @@ def update_t_table(slide, S3):
     ]
     TABLE_WIDTH = sum(COL_WIDTHS)
     N_ROWS = len(T_TABLE_ROW_ORDER) + 1  # 9 business lines + totals
-    ROW_HEIGHT = Emu(234140)
+    ROW_HEIGHT = Emu(205000)
     TABLE_HEIGHT = ROW_HEIGHT * N_ROWS
 
     # Colors
@@ -863,7 +975,8 @@ def update_t_table(slide, S3):
             pass
         return False
     
-    # First pass: delete all shapes in the T-table region (except T title + bg strip)
+    # First pass: delete all shapes in the T-table region (except T title + bg strip + So What)
+    _sowhat_saved = []
     for sh in list(slide.shapes):
         if sh.top is not None and sh.left is not None:
             if sh.top >= Emu(3000000) and sh.top < Emu(9500000):
@@ -873,6 +986,16 @@ def update_t_table(slide, S3):
                         text = sh.text_frame.text.strip()
                         if "签批时效综合分析" in text or "T  签批" in text:
                             print(f"  [T-title] Preserved title text: {text!r}")
+                            continue
+                        # Skip So What labels (short text starting with "So What")
+                        if text.startswith("So What"):
+                            print(f"  [SoWhat] Preserved label text ({len(text)} chars): {text}")
+                            _sowhat_saved.append((sh, text))
+                            continue
+                        # Skip So What long text boxes (> 100 chars)
+                        if len(text) > 100:
+                            print(f"  [SoWhat] Preserved long text ({len(text)} chars): {text[:60]}...")
+                            _sowhat_saved.append((sh, text))
                             continue
                     # Skip the T title background strip
                     if _is_t_title_bg(sh):
@@ -889,12 +1012,15 @@ def update_t_table(slide, S3):
             # Skip the T title shape
             if "签批时效综合分析" in text or "T  签批" in text:
                 continue
+            # Skip So What labels and long text boxes
+            if text.startswith("So What") or len(text) > 100:
+                continue
             if any(ht in text for ht in header_texts):
                 if sh.left is not None and sh.left >= Emu(5000000):
                     sh._element.getparent().remove(sh._element)
                     removed += 1
     
-    print(f"  removed {removed} old T-table shapes (T title + bg strip preserved)")
+    print(f"  removed {removed} old T-table shapes (T title + bg strip + {len(_sowhat_saved)} So What preserved)")
 
     # Find the business line with the MAX average TAT (for red highlight)
     max_tat_biz = None
@@ -973,6 +1099,64 @@ def update_t_table(slide, S3):
 # main
 # ---------------------------------------------------------------------------
 
+def _save_sowhat_shapes(slide):
+    """Save all So What-related shapes from a slide as XML elements.
+    Returns list of dicts with element copies."""
+    from copy import deepcopy
+    from lxml import etree
+    NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+    saved = []
+    for sh in slide.shapes:
+        if sh.has_text_frame:
+            t = sh.text_frame.text.strip()
+            if t.startswith('So What') or (len(t) > 100 and len(t) < 200):
+                el = deepcopy(sh._element)
+                cNvPr = el.find(f".//{{{NS_P}}}cNvPr")
+                if cNvPr is not None:
+                    cNvPr.set("id", "0")
+                saved.append({
+                    'element': el,
+                    'text': t,
+                })
+    return saved
+
+
+def _restore_sowhat_shapes(slide, saved):
+    """Restore saved So What shapes to the slide, skipping any that still exist."""
+    spTree = slide.shapes._spTree
+    existing_texts = set()
+    existing_positions = set()
+    for sh in slide.shapes:
+        if sh.has_text_frame:
+            t = sh.text_frame.text.strip()
+            if t:
+                existing_texts.add(t)
+        if sh.top is not None and sh.left is not None:
+            existing_positions.add((sh.top, sh.left))
+    
+    restored = 0
+    for item in saved:
+        text = item['text']
+        if text in existing_texts:
+            continue
+        el = item['element']
+        cNvPr = el.find('.//{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr')
+        if cNvPr is not None:
+            off = cNvPr.find('{http://schemas.openxmlformats.org/drawingml/2006/main}off')
+            if off is not None:
+                x = int(off.get('x', 0))
+                y = int(off.get('y', 0))
+                if (y, x) in existing_positions:
+                    continue
+        spTree.append(el)
+        restored += 1
+        existing_texts.add(text)
+    
+    if restored > 0:
+        print(f"  [SoWhat] Restored {restored} missing So What shape(s)")
+    return restored
+
+
 def main():
     print(f"Loading {IN_PPT} …")
     prs = Presentation(IN_PPT)
@@ -985,6 +1169,10 @@ def main():
 
     slide3 = prs.slides[2]
     slide7 = prs.slides[6]
+
+    # ── Save So What shapes before any slide-7 processing ──
+    _sowhat_backup = _save_sowhat_shapes(slide7)
+    print(f"\n[SoWhat] Saved {len(_sowhat_backup)} So What shape(s) before slide-7 processing")
 
     print("\n[Slide 3] License table")
     h, m = patch_license_table(slide3, S1["H"])
@@ -1002,6 +1190,9 @@ def main():
     stats = rebuild_heat_matrix_on_slide7(slide7, s3_rows)
     print(f"  deleted {stats['deleted']} old shapes; rebuilt 3 matrices × "
           f"({len(HEAT_ORDER)} rows × {stats['n_weeks']} weeks + totals)")
+
+    # ── Restore any So What shapes that were lost during processing ──
+    _restore_sowhat_shapes(slide7, _sowhat_backup)
 
     print("\n[Slide 7] Dedupe T 时效 table ghost cells")
     n = dedupe_t_table_ghosts(slide7)
@@ -1033,6 +1224,10 @@ def main():
     hits, misses, orphans = patch_all_sowhat(prs, ctx)
     print(f"  so-what: {hits} updated, {misses} missing generators, "
           f"{orphans} orphan labels")
+
+    print("\n[Slide 7] Adjust T So What position down + unify backgrounds")
+    _adjust_t_sowhat_position(slide7)
+    _unify_sowhat_backgrounds(slide7)
 
     prs.save(OUT_PPT)
     print(f"\n✅ Saved: {OUT_PPT}")

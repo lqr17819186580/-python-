@@ -773,6 +773,7 @@ REGISTRY = [
     (6,  3197987,  6236716, gen_s7_sign),
     (6,  6291072,   182880, gen_s7_app),
     (6,  6291072,  6254496, gen_s7_lifecycle),
+    (6,  6491072,  6254496, gen_s7_lifecycle),
 
     (7,  2968625,  6040755, gen_s8_top_contributors),
     (7,  6152642,   286258, gen_s8_approval_rate),

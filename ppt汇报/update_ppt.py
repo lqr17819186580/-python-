@@ -1642,161 +1642,166 @@ _wv_hh = CH_HHZJ["issued_m"];  _wv_mga = CH_MGA["issued_m"]
 _wv_ub = UNBAT_APE_M; _wv_pd = PEND_APE_M
 _wv_gap = _WF_MAX - (_wv_bk+_wv_ym+_wv_th+_wv_tl+_wv_ic+_wv_cs+_wv_hh+_wv_mga+_wv_ub+_wv_pd)
 
-# Bar shapes — FIXED order from PPT left-position scan:
-# Shape 102(BK), Shape 106(永明), Shape_313(同行),
-# Shape_315×5 sorted by left: 5488940(天领),5778500(ICLUB),6057900(成事),6337300(合伙),6626860(MGA)
-# Shape 114(未批核), Shape 118(待签), Shape 121(缺口)
-_s315 = sorted([sh for sh in _slide4.shapes if sh.name=="Shape_315"], key=lambda s:s.left)
+# ── Waterfall bars: 11 bars (BK,永明,同行,天领,ICLUB,成事,合伙,MGA,未批核,待签,缺口) ──
+# Evenly redistribute all 11 bars across the available horizontal space.
+import copy as _copy_wf
 
+# Collect bar shapes in display order
+_s315 = sorted([sh for sh in _slide4.shapes if sh.name == "Shape_315"], key=lambda s: s.left)
+
+# Clone Shape_315 for MGA if template only has 4 (天领/ICLUB/成事/合伙)
 if len(_s315) == 4:
-    import copy as _copy_wf
     _last_s315 = _s315[-1]
     _new_s315_elem = _copy_wf.deepcopy(_last_s315._element)
     _slide4.shapes._spTree.append(_new_s315_elem)
-    _new_s315 = [sh for sh in _slide4.shapes if sh.name=="Shape_315" and sh not in _s315][0]
+    _new_s315 = [sh for sh in _slide4.shapes if sh.name == "Shape_315" and sh not in _s315][0]
     _s315.append(_new_s315)
-    _new_s315.left = _last_s315.left + 289560
-    _new_s315.top = _last_s315.top
+    print(f"  [H] Cloned Shape_315 for MGA (now {len(_s315)} bars)")
+elif len(_s315) > 5:
+    _s315 = _s315[:5]
 
-    _text314_list = sorted([sh for sh in _slide4.shapes if sh.name=="Text_314"], key=lambda s:s.left)
-    if len(_text314_list) == 4:
-        _last_text314 = _text314_list[-1]
-        _new_text314_elem = _copy_wf.deepcopy(_last_text314._element)
-        _slide4.shapes._spTree.append(_new_text314_elem)
-        _new_text314 = [sh for sh in _slide4.shapes if sh.name=="Text_314" and sh not in _text314_list][0]
-        _new_text314.left = _last_text314.left + 289560
-        _new_text314.top = _last_text314.top
+# Clone value label Text_314 for MGA if needed
+_text314_list = sorted([sh for sh in _slide4.shapes if sh.name == "Text_314"], key=lambda s: s.left)
+if len(_text314_list) == 4:
+    _last_t314 = _text314_list[-1]
+    _new_t314_elem = _copy_wf.deepcopy(_last_t314._element)
+    _slide4.shapes._spTree.append(_new_t314_elem)
+    _new_t314 = [sh for sh in _slide4.shapes if sh.name == "Text_314" and sh not in _text314_list][0]
+    _text314_list = sorted([sh for sh in _slide4.shapes if sh.name == "Text_314"], key=lambda s: s.left)
+    print(f"  [H] Cloned Text_314 for MGA value label")
 
-import copy as _copy_wf
-_name_labels = sorted([sh for sh in _slide4.shapes if sh.name.startswith("Text_") and sh.has_text_frame], key=lambda s:s.left)
-_mga_label_exists = any("MGA" in sh.text_frame.text for sh in _name_labels if sh.has_text_frame)
-if not _mga_label_exists:
-    _last_name_label = None
-    for _lbl_name in ["天领", "ICLUB", "成事", "合伙"]:
-        for sh in _slide4.shapes:
-            if sh.has_text_frame and _lbl_name in sh.text_frame.text:
-                _last_name_label = sh
-                break
-        if _last_name_label:
-            break
-    if _last_name_label:
-        _new_name_label_elem = _copy_wf.deepcopy(_last_name_label._element)
-        _slide4.shapes._spTree.append(_new_name_label_elem)
-        _new_name_label = [sh for sh in _slide4.shapes if sh not in _name_labels][0]
-        _new_name_label.left = _last_name_label.left + 289560
-        _new_name_label.top = _last_name_label.top
-        if _new_name_label.text_frame.paragraphs and _new_name_label.text_frame.paragraphs[0].runs:
-            _new_name_label.text_frame.paragraphs[0].runs[0].text = "MGA"
-        else:
-            _new_name_label.text_frame.text = "MGA"
-        print(f"  [H] Added MGA name label at left={_new_name_label.left}")
-
-_wf_bottom_labels = [sh for sh in _slide4.shapes if sh.has_text_frame and 5660000 <= sh.top <= 5675000]
-_wf_mga_bottom_label_exists = any("MGA" in ''.join(r.text for p in sh.text_frame.paragraphs for r in p.runs) for sh in _wf_bottom_labels)
-if not _wf_mga_bottom_label_exists:
-    _last_wf_label = None
-    for _lbl_name in ["合伙转介批核", "成事家办批核", "ICLUB批核", "天领业务批核"]:
+# Clone bottom label for MGA if needed
+_wf_bottom_labels = [sh for sh in _slide4.shapes if sh.has_text_frame and 5600000 <= sh.top <= 5700000]
+_mga_bottom_exists = any("MGA" in ''.join(r.text for p in sh.text_frame.paragraphs for r in p.runs) for sh in _wf_bottom_labels)
+if not _mga_bottom_exists:
+    _ref_bottom = None
+    for _ref_name in ["合伙\n转介\n批核", "成事\n家办\n批核", "ICLUB\n批核", "天领\n业务\n批核"]:
         for sh in _wf_bottom_labels:
-            text = ''.join(r.text for p in sh.text_frame.paragraphs for r in p.runs)
-            if _lbl_name in text:
-                _last_wf_label = sh
-                break
-        if _last_wf_label:
-            break
-    if _last_wf_label:
-        _new_wf_label_elem = _copy_wf.deepcopy(_last_wf_label._element)
-        _slide4.shapes._spTree.append(_new_wf_label_elem)
-        _new_wf_label = [sh for sh in _slide4.shapes if sh not in _wf_bottom_labels][0]
-        _new_wf_label.left = 6626860
-        _new_wf_label.top = _last_wf_label.top
-        if _new_wf_label.text_frame.paragraphs and _new_wf_label.text_frame.paragraphs[0].runs:
-            _new_wf_label.text_frame.paragraphs[0].runs[0].text = "MGA批核"
+            if _ref_name in sh.text_frame.text:
+                _ref_bottom = sh; break
+        if _ref_bottom: break
+    if _ref_bottom:
+        _new_bl_elem = _copy_wf.deepcopy(_ref_bottom._element)
+        _slide4.shapes._spTree.append(_new_bl_elem)
+        _new_bl = [sh for sh in _slide4.shapes if sh not in _wf_bottom_labels][0]
+        _wf_bottom_labels.append(_new_bl)
+        # Set MGA bottom label text
+        if _new_bl.text_frame.paragraphs and _new_bl.text_frame.paragraphs[0].runs:
+            _new_bl.text_frame.paragraphs[0].runs[0].text = "MGA\n批核"
+            for rr in _new_bl.text_frame.paragraphs[0].runs[1:]: rr.text = ""
         else:
-            _new_wf_label.text_frame.text = "MGA批核"
-        print(f"  [H] Added MGA bottom label at left={_new_wf_label.left}")
+            _new_bl.text_frame.text = "MGA\n批核"
+        # Remove white fill from cloned bottom label (inherited from template)
+        try:
+            _new_bl.fill.background()
+        except:
+            pass
+        print(f"  [H] Cloned bottom label for MGA")
 
-# Bar table: (shape_name_or_None, s315_idx, val_m, lbl_name, lbl_left)
-_WF_BAR_TABLE = [
-    ("Shape 102",  None, _wv_bk,  "Text 103", 4480433),   # BK
-    ("Shape 106",  None, _wv_ym,  "Text 107", 4785106),   # 永明 ← was Shape_313, wrong!
-    ("Shape_313",  None, _wv_th,  "Text 107", 5092446),   # 同行
-    (None,         0,    _wv_tl,  "Text_314", 5525135),   # 天领  (S315 left=5488940)
-    (None,         1,    _wv_ic,  "Text_314", 5805805),   # ICLUB (S315 left=5778500)
-    (None,         2,    _wv_cs,  "Text_314", 6128385),   # 成事  (S315 left=6057900)
-    (None,         3,    _wv_hh,  "Text_314", 6356985),   # 合伙  (S315 left=6337300)
-    (None,         4,    _wv_mga, "Text_314", 6655585),   # MGA   (S315 left=6626860)
-    ("Shape 114",  None, _wv_ub,  "Text 115", 6850380),   # 未批核
-    ("Shape 118",  None, _wv_pd,  "Text 119", 7183000),   # 待签
-    ("Shape 121",  None, _wv_gap, "Text 122", 7515613),   # 缺口
+# ── Compute evenly-distributed X positions for all 11 bars ──
+_WF_BAR_ORDER = [
+    ("Shape 102",  None, _wv_bk,  "Text 103",  "BK\n业务\n批核"),
+    ("Shape 106",  None, _wv_ym,  "Text 107",  "永明\n经代\n批核"),
+    ("Shape_313",  None, _wv_th,  "Text 107",  "同行\n经代\n批核"),
+    (None,         0,    _wv_tl,  "Text_314",  "天领\n业务\n批核"),
+    (None,         1,    _wv_ic,  "Text_314",  "ICLUB\n批核"),
+    (None,         2,    _wv_cs,  "Text_314",  "成事\n家办\n批核"),
+    (None,         3,    _wv_hh,  "Text_314",  "合伙\n转介\n批核"),
+    (None,         4,    _wv_mga, "Text_314",  "MGA\n批核"),
+    ("Shape 114",  None, _wv_ub,  "Text 115",  "未\n批核"),
+    ("Shape 118",  None, _wv_pd,  "Text 119",  "待\n签"),
+    ("Shape 121",  None, _wv_gap, "Text 122",  "预估\n缺口"),
 ]
+_n_bars = len(_WF_BAR_ORDER)
+
+# Use original first bar position; compute step to fit all bars in available space
+_wf_first_left = 4563110   # Shape 102 original left
+_wf_last_orig   = 7194550   # Shape 121 original left
+_wf_avail       = _wf_last_orig - _wf_first_left  # ~2631440 EMU
+_wf_step        = int(_wf_avail / (_n_bars - 1))  # ~263144 per bar
+
+print(f"  [H] Waterfall: {_n_bars} bars, step={_wf_step} EMU ({_wf_avail} total span)")
+
+# Collect all value labels and bottom labels sorted by original left position
+_all_value_labels = sorted(
+    [sh for sh in _slide4.shapes if sh.name in ("Text 103", "Text 107", "Text_314", "Text 115", "Text 119", "Text 122") and sh.has_text_frame],
+    key=lambda s: s.left
+)
+_all_bottom_labels = sorted(
+    [sh for sh in _slide4.shapes if sh.has_text_frame and 5600000 <= sh.top <= 5700000],
+    key=lambda s: s.left
+)
+
+# Track which labels have been assigned (to avoid double-matching same-name shapes)
+_used_value = set()
+_used_bottom = set()
 
 _LBL_H = 182880; _LBL_GAP = 40000
 _cum = _WF_MAX
 
-for sh_name, s315_idx, val_m, lbl_name, lbl_left in _WF_BAR_TABLE:
-    bar_top = _top_at(_cum)
-    bar_h   = _bar_h(val_m)
-    _cum   -= val_m
-    bar_ok  = False
+for i, (sh_name, s315_idx, val_m, vlbl_name, bottom_txt) in enumerate(_WF_BAR_ORDER):
+    bar_left = _wf_first_left + i * _wf_step
+    bar_top  = _top_at(_cum)
+    bar_h    = _bar_h(val_m)
+    _cum    -= val_m
+    bar_ok   = False
 
-    # Update bar shape size/position
+    # Update bar shape position/size
     if sh_name is not None:
         for sh in _slide4.shapes:
             if sh.name == sh_name:
-                sh.top = bar_top; sh.height = bar_h; bar_ok = True; break
+                sh.left = bar_left; sh.top = bar_top; sh.height = bar_h; bar_ok = True; break
     elif s315_idx is not None and s315_idx < len(_s315):
         sh = _s315[s315_idx]
-        sh.top = bar_top; sh.height = bar_h; bar_ok = True
+        sh.left = bar_left; sh.top = bar_top; sh.height = bar_h; bar_ok = True
 
-    # FIX B: Labels always above bar — never center-inside-bar.
-    # When labels are centered inside the bar, they blend with the bar color and become invisible.
+    # ── Value label above bar ──
     lbl_new_top = bar_top - _LBL_H - _LBL_GAP
+    lbl_new_left = bar_left - 80000   # value label offset from bar left
+    lbl_txt = ("\u2212" if val_m >= 0 else "+") + f"{abs(val_m):.0f}" if vlbl_name != "Text 122" else f"{val_m:.0f}"
 
-    lbl_txt = ("−" if val_m >= 0 else "+") + f"{abs(val_m):.0f}" if lbl_name != "Text 122" else f"{val_m:.0f}"
-    for sh in _slide4.shapes:
+    best_vl = None; best_vl_dist = 999999999
+    for sh in _all_value_labels:
+        if id(sh) in _used_value: continue
+        if sh.name != vlbl_name: continue
+        d = abs(sh.left - lbl_new_left)
+        if d < best_vl_dist:
+            best_vl_dist = d; best_vl = sh
+    if best_vl is not None:
+        _used_value.add(id(best_vl))
+        best_vl.left = lbl_new_left
+        best_vl.top  = lbl_new_top
+        if best_vl.text_frame.paragraphs and best_vl.text_frame.paragraphs[0].runs:
+            best_vl.text_frame.paragraphs[0].runs[0].text = lbl_txt
+            if vlbl_name == "Text 122":
+                best_vl.text_frame.paragraphs[0].runs[0].font.color.rgb = RGBColor(0xC0, 0x39, 0x2B)
+            for rr in best_vl.text_frame.paragraphs[0].runs[1:]: rr.text = ""
+
+    # ── Bottom label below bar ──
+    bl_new_left = bar_left - 130000   # bottom label offset from bar left
+    best_bl = None; best_bl_dist = 999999999
+    for sh in _all_bottom_labels:
+        if id(sh) in _used_bottom: continue
         if not sh.has_text_frame: continue
-        if sh.name != lbl_name: continue
-        if abs(sh.left - lbl_left) > 120000: continue
-        sh.top = lbl_new_top
-        if sh.text_frame.paragraphs and sh.text_frame.paragraphs[0].runs:
-            sh.text_frame.paragraphs[0].runs[0].text = lbl_txt
-            # 缺口标签(Text 122)在柱子上方白色区域，白字不可见 → 改为红色匹配柱子颜色
-            if lbl_name == "Text 122":
-                sh.text_frame.paragraphs[0].runs[0].font.color.rgb = RGBColor(0xC0, 0x39, 0x2B)
-            for rr in sh.text_frame.paragraphs[0].runs[1:]: rr.text = ""
-        break
+        d = abs(sh.left - bl_new_left)
+        if d < best_bl_dist:
+            best_bl_dist = d; best_bl = sh
+    if best_bl is not None:
+        _used_bottom.add(id(best_bl))
+        best_bl.left = bl_new_left
+        # If this is the MGA cloned label, ensure text is correct and remove white fill
+        _bl_text = ''.join(r.text for p in best_bl.text_frame.paragraphs for r in p.runs)
+        if "MGA" in _bl_text:
+            if best_bl.text_frame.paragraphs and best_bl.text_frame.paragraphs[0].runs:
+                best_bl.text_frame.paragraphs[0].runs[0].text = "MGA\n批核"
+                for rr in best_bl.text_frame.paragraphs[0].runs[1:]: rr.text = ""
+            try:
+                best_bl.fill.background()
+            except:
+                pass
 
-    seg_name = {None: sh_name, 0:'天领', 1:'ICLUB', 2:'成事', 3:'合伙', 4:'MGA'}.get(s315_idx, sh_name)
-    print(f"  [H] {str(seg_name):10s} {val_m:7.1f}M top={bar_top} h={bar_h} lbl={lbl_txt!r} {'✓' if bar_ok else '(lbl only)'}")
-
-# ── Remove extra white text boxes on Slide 4 ──────────────────────────────
-# The "MGA批核" label was added as a copy of existing labels, inheriting white
-# background + border. Remove it to avoid duplicate white text boxes.
-print("\n[Slide 4] Cleaning up extra white text boxes...")
-_removed_extra = 0
-for _sh in list(_slide4.shapes):
-    if not _sh.has_text_frame:
-        continue
-    _text = _sh.text_frame.text.strip()
-    # Remove "MGA批核" bottom label if it has white fill + border (inherited from template copy)
-    if _text == "MGA批核":
-        try:
-            if _sh.fill.type == 1:  # SOLID fill
-                try:
-                    _fill_rgb = _sh.fill.fore_color.rgb
-                    if _fill_rgb == RGBColor(0xFF, 0xFF, 0xFF):  # White fill
-                        _sh._element.getparent().remove(_sh._element)
-                        _removed_extra += 1
-                        print(f"  Removed white text box: {_text!r} at top={_sh.top}, left={_sh.left}")
-                        continue
-                except:
-                    pass
-        except:
-            pass
-if _removed_extra > 0:
-    print(f"  Cleaned up {_removed_extra} extra white text box(es)")
-else:
-    print("  No extra white text boxes found (already clean)")
+    seg_name = {None: sh_name, 0: '天领', 1: 'ICLUB', 2: '成事', 3: '合伙', 4: 'MGA'}.get(s315_idx, sh_name)
+    print(f"  [H] {str(seg_name):10s} {val_m:7.1f}M left={bar_left} top={bar_top} h={bar_h} lbl={lbl_txt!r} {'✓' if bar_ok else '(lbl only)'}")
 
 # ── Remaining chart replacements — names confirmed from xlsx embed log ────
 # All use preferred_slide to avoid name conflicts (Chart_YY/QD/PH/0/1 exist on
